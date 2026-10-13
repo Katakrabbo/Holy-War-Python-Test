@@ -150,6 +150,7 @@ button:focus-visible { outline: 3px solid var(--gold-2); outline-offset: 3px; }
 .unit-row .game-card strong.name-long { font-size: .78rem; }
 .unit-row .game-card strong.name-very-long { font-size: .69rem; line-height: 1.02; }
 .game-card .stats { color: var(--gold-2); font-weight: 800; font-size: .75rem; }
+.inspiration-symbol { width: .58em; height: .78em; display: inline-block; vertical-align: -.06em; border: 1px solid #9be7ef; border-radius: 58% 52% 58% 18%; background: linear-gradient(135deg, #d9fbff 5%, #67c6d4 48%, #287f91 100%); box-shadow: 0 0 5px rgba(103,198,212,.48); transform: rotate(45deg); }
 .enemy-card { background: linear-gradient(145deg, #563e33, #201916 72%); }
 .own-card { background: linear-gradient(145deg, #245263, #11232a 72%); }
 .hand-card { flex: 0 0 var(--card-w); }

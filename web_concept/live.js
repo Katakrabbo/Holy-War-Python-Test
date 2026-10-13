@@ -156,7 +156,7 @@ function makeHandCard(card) {
   const stats = card.strength != null
     ? `<span class="stats">✦ ${card.strength}&nbsp;&nbsp; ◈ ${card.faith ?? "–"}</span>`
     : `<span class="card-hint">Trascina o usa il tasto destro</span>`;
-  button.innerHTML = `<small>${card.type.toUpperCase()} · ✟ ${card.cost ?? "–"}</small><strong>${card.name}</strong>${stats}`;
+  button.innerHTML = `<small>${card.type.toUpperCase()} · <i class="inspiration-symbol" aria-hidden="true"></i> ${card.cost ?? "–"}</small><strong>${card.name}</strong>${stats}`;
   button.addEventListener("click", () => showCard(card, button));
   button.addEventListener("contextmenu", event => openContextMenu(event, card, button));
   return button;
@@ -286,7 +286,7 @@ function showEffectChoicePreview(card, selector) {
   preview.querySelector(".effect-preview-type").textContent = `${card.type.toUpperCase()}${card.expansion ? ` · ${card.expansion}` : ""}`;
   preview.querySelector("h3").textContent = card.name;
   const stats = [
-    `<span title="Ispirazione richiesta">✟ Ispirazione <b>${card.cost ?? "–"}</b></span>`,
+    `<span title="Ispirazione richiesta"><i class="inspiration-symbol" aria-hidden="true"></i> Ispirazione <b>${card.cost ?? "–"}</b></span>`,
     `<span title="Attacco">✦ ATK <b>${card.strength ?? "–"}</b></span>`,
     `<span title="Fede">◈ Fede <b>${card.faith ?? "–"}</b></span>`,
     `<span title="Croci">Croci <b>${card.crosses ?? "–"}</b></span>`
@@ -315,7 +315,7 @@ function makeEffectChoiceContent(option, previewSelector) {
   const stats = document.createElement("span");
   stats.className = "effect-choice-stats";
   stats.innerHTML = [
-    `<span title="Ispirazione">✟ ${option.card.cost ?? "–"}</span>`,
+    `<span title="Ispirazione"><i class="inspiration-symbol" aria-hidden="true"></i> ${option.card.cost ?? "–"}</span>`,
     `<span title="Attacco">✦ ${option.card.strength ?? "–"}</span>`,
     `<span title="Fede">◈ ${option.card.faith ?? "–"}</span>`
   ].join("");
