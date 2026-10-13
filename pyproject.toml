@@ -20,6 +20,13 @@ dev = [
 [project.scripts]
 holywar = "holywar.cli:main"
 holywar-gui = "holywar.gui:main"
+holywar-web = "holywar.web:main"
+
+[tool.setuptools.packages.find]
+include = ["holywar*"]
+
+[tool.setuptools.package-data]
+holywar = ["data/*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

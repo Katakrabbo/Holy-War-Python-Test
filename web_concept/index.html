@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Concept locale dell'interfaccia TCG di Holy War">
+  <title>Holy War — TCG UI Concept</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <p class="eyebrow">PROTOTIPO INTERFACCIA</p>
+        <h1>HOLY WAR</h1>
+      </div>
+      <div class="turn-summary" aria-live="polite">
+        <span class="turn-dot"></span>
+        <div>
+          <strong id="turn-label">Il tuo turno</strong>
+          <small id="phase-label">Fase principale · Turno 4</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="chain-setting" role="group" aria-label="Impostazione catena">
+          <span>CATENA</span>
+          <button class="chain-setting-button" id="chain-enable-button" type="button" aria-pressed="true">Sì</button>
+          <button class="chain-setting-button" id="chain-disable-button" type="button" aria-pressed="false">No</button>
+        </div>
+        <button class="button button-quiet" id="menu-button" type="button">Menu <kbd>ESC</kbd></button>
+      </div>
+    </header>
+
+    <section class="game-layout">
+      <aside class="player-panel opponent-summary" aria-label="Risorse avversario">
+        <div class="identity-row">
+          <div class="avatar cpu">AI</div>
+          <div>
+            <small>AVVERSARIO</small>
+            <h2>Custode</h2>
+          </div>
+        </div>
+        <div class="resource-row">
+          <span><b>12</b> Peccato</span>
+          <span><b>31</b> Deck</span>
+        </div>
+      </aside>
+
+      <aside class="match-tools" aria-label="Risorsa attiva e comandi partita">
+        <div class="inspiration-heading">
+          <small>ISPIRAZIONE ATTIVA</small>
+          <strong id="inspiration-owner">Pellegrino</strong>
+        </div>
+        <div class="inspiration-gauge" id="inspiration-gauge" style="--value: 90" role="progressbar" aria-label="Ispirazione rimanente" aria-valuemin="0" aria-valuemax="10" aria-valuenow="9">
+          <div class="gauge-center"><strong id="inspiration-value">9</strong><span>/10</span></div>
+        </div>
+        <div class="side-actions">
+          <button class="button button-primary" id="chain-pass-button" type="button" hidden>Passa priorità</button>
+          <button class="button button-primary" id="end-turn-button" type="button">Termina turno</button>
+          <button class="button button-danger" id="surrender-button" type="button">Resa</button>
+        </div>
+      </aside>
+
+      <section class="board" aria-label="Campo di gioco">
+        <div class="territory territory-enemy">
+          <div class="direct-attack-zone" data-direct-attack="direct" aria-label="Attacca direttamente l'avversario">
+            <strong>Attacco diretto</strong>
+            <span>Rilascia qui il Santo</span>
+          </div>
+          <div class="enemy-hand" aria-label="Mano avversario">
+            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
+            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
+            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
+            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
+            <span class="zone-caption">Mano avversario · 4 carte</span>
+          </div>
+        </div>
+
+        <div class="battlefield">
+          <span class="zone-title battlefield-title">Campo dei Santi</span>
+          <div class="field-rails" aria-label="Deck, cimiteri e carte scomunicate">
+            <div class="field-side-group">
+              <span class="side-owner">Avversario</span>
+              <div class="zone-stack" aria-label="Zone avversario">
+                <div class="zone-slot compact"><span>Deck</span><b>31</b></div>
+                <button class="zone-slot compact inspectable-zone" data-zone-owner="opponent" data-zone-kind="graveyard" data-deck-replacement="false" type="button"><span>Cimitero</span><b>6</b></button>
+                <button class="zone-slot compact inspectable-zone" data-zone-owner="opponent" data-zone-kind="excommunicated" data-deck-replacement="false" type="button"><span>Scomunicate</span><b>1</b></button>
+              </div>
+            </div>
+            <div class="field-side-group">
+              <span class="side-owner">Tu</span>
+              <div class="zone-stack" aria-label="Le tue zone">
+                <div class="zone-slot compact"><span>Deck</span><b>28</b></div>
+                <button class="zone-slot compact inspectable-zone" data-zone-owner="player" data-zone-kind="graveyard" data-deck-replacement="false" type="button"><span>Cimitero</span><b>3</b></button>
+                <button class="zone-slot compact inspectable-zone" data-zone-owner="player" data-zone-kind="excommunicated" data-deck-replacement="false" type="button"><span>Scomunicate</span><b>0</b></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="saint-formations">
+            <div class="formation-row enemy-defense-line">
+            <div class="row-label"><b>DIFESA</b><span>Seconda linea</span></div>
+            <div class="unit-row" aria-label="Santi avversari in difesa">
+              <button class="game-card saint enemy-card reserve-card" data-card="enemy-guardiano" type="button">
+                <strong>Guardiano dello Yin</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
+              </button>
+              <div class="empty-slot unit"><span>Difesa 2</span></div>
+              <div class="empty-slot unit"><span>Difesa 3</span></div>
+            </div>
+            </div>
+
+            <div class="lane-connectors enemy-connectors" aria-hidden="true"><span>↓</span><span>↓</span><span>↓</span></div>
+
+            <div class="formation-row enemy-attack-line">
+            <div class="row-label attack-label"><b>ATTACCO</b><span>Prima linea</span></div>
+            <div class="unit-row" aria-label="Santi avversari in attacco">
+              <button class="game-card saint enemy-card" data-card="enemy-araldo" type="button">
+                <strong>Araldo della Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
+              </button>
+              <button class="game-card saint enemy-card" data-card="custode" type="button">
+                <strong>Custode dei Sigilli</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
+              </button>
+              <div class="empty-slot unit"><span>Attacco 3</span></div>
+            </div>
+            </div>
+
+            <div class="field-divider">
+              <span>Territorio avversario</span>
+              <b>LINEA DEL FRONTE</b>
+              <span>Il tuo territorio</span>
+            </div>
+
+            <div class="formation-row player-attack-line">
+            <div class="row-label attack-label"><b>ATTACCO</b><span>Prima linea</span></div>
+            <div class="unit-row" aria-label="I tuoi Santi in attacco">
+              <button class="game-card saint own-card" data-card="guerriero" type="button">
+                <strong>Guerriero Santificato</strong><span class="stats">✦ 5&nbsp;&nbsp; ◈ 4</span>
+              </button>
+              <div class="empty-slot unit valid-target"><span>Attacco 2</span><em>Gioca qui</em></div>
+              <button class="game-card saint own-card" data-card="own-araldo" type="button">
+                <strong>Araldo della Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
+              </button>
+            </div>
+            </div>
+
+            <div class="lane-connectors player-connectors" aria-hidden="true"><span>↑</span><span>↑</span><span>↑</span></div>
+
+            <div class="formation-row player-defense-line">
+            <div class="row-label"><b>DIFESA</b><span>Seconda linea</span></div>
+            <div class="unit-row" aria-label="I tuoi Santi in difesa">
+              <button class="game-card saint own-card reserve-card" data-card="own-guardiano" type="button">
+                <strong>Guardiano dello Yin</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
+              </button>
+              <div class="empty-slot unit valid-target"><span>Difesa 2</span><em>Gioca qui</em></div>
+              <div class="empty-slot unit"><span>Difesa 3</span></div>
+            </div>
+            </div>
+          </div>
+
+          <div class="field-supports" aria-label="Artefatti ed edifici">
+            <div class="field-side-group">
+              <div class="support-grid enemy-support" aria-label="Supporti avversario">
+                <button class="mini-card artifact artifact-top-left" data-card="acqua" type="button"><span>Acqua</span></button>
+                <div class="empty-slot artifact-top-right" aria-label="Slot artefatto libero"></div>
+                <button class="mini-card building building-tall" data-card="altare" type="button"><span>Altare dei Sette Sigilli</span></button>
+                <div class="empty-slot artifact-bottom-left" aria-label="Slot artefatto libero"></div>
+                <div class="empty-slot artifact-bottom-right" aria-label="Slot artefatto libero"></div>
+              </div>
+            </div>
+            <div class="field-side-group">
+              <div class="support-grid own-support" aria-label="I tuoi supporti">
+                <button class="mini-card artifact artifact-top-left" data-card="reliquia" type="button"><span>Reliquia Solare</span></button>
+                <div class="empty-slot artifact-top-right" aria-label="Slot artefatto libero"></div>
+                <div class="empty-slot building-slot building-tall" aria-label="Slot edificio libero"></div>
+                <div class="empty-slot artifact-bottom-left" aria-label="Slot artefatto libero"></div>
+                <div class="empty-slot artifact-bottom-right" aria-label="Slot artefatto libero"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="territory territory-player">
+          <div class="hand-area" aria-label="La tua mano">
+            <div class="hand-heading">
+              <span class="zone-title">La tua mano</span>
+              <span class="hand-interaction-hint">Passa qui per aprire</span>
+            </div>
+            <div class="hand-cards" style="--hand-count: 5">
+              <button class="game-card hand-card selected" data-card="arca" type="button">
+                <small>MALEDIZIONE · ✟ 8</small><strong>Arca della salvezza</strong><span class="card-hint">Selezionata</span>
+              </button>
+              <button class="game-card hand-card" data-card="acqua" type="button">
+                <small>ARTEFATTO · ✟ 2</small><strong>Acqua</strong><span class="card-hint">Seleziona</span>
+              </button>
+              <button class="game-card hand-card" data-card="araldo" type="button">
+                <small>SANTO · ✟ 6</small><strong>Araldo della Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
+              </button>
+              <button class="game-card hand-card" data-card="cura" type="button">
+                <small>BENEDIZIONE · ✟ 3</small><strong>Cura Rapida</strong><span class="card-hint">Seleziona</span>
+              </button>
+              <button class="game-card hand-card" data-card="foresta" type="button">
+                <small>EDIFICIO · ✟ 5</small><strong>Foresta Sacra</strong><span class="card-hint">Seleziona</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="targeting-toolbar" id="targeting-toolbar" aria-live="polite" hidden>
+          <div>
+            <small>SELEZIONE BERSAGLI</small>
+            <strong id="targeting-title">Scegli un bersaglio</strong>
+          </div>
+          <span class="targeting-count" id="targeting-count">0/1</span>
+          <button class="button button-primary compact-button" id="confirm-targets-button" type="button" disabled>Conferma</button>
+          <button class="button button-quiet compact-button" id="cancel-targets-button" type="button">Annulla</button>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Dettaglio e azioni carta">
+        <div class="card-inspector-pane">
+          <div class="inspector-heading">
+            <small>CARTA SELEZIONATA</small>
+            <button class="icon-button" id="close-inspector" aria-label="Chiudi dettaglio" type="button">×</button>
+          </div>
+
+          <div class="card-preview curse" id="card-preview">
+            <span class="preview-type" id="preview-type">MALEDIZIONE</span>
+            <div class="preview-symbol">HW</div>
+            <h2 id="preview-name">Arca della salvezza</h2>
+            <div class="preview-stats" id="preview-stats"><span>Costo <b>8</b></span></div>
+          </div>
+
+          <div class="effect-box">
+            <small>EFFETTO</small>
+            <p id="preview-effect">Scegli due Santi sul campo. Distruggi tutti gli altri Santi.</p>
+          </div>
+
+        </div>
+
+        <section class="inspector-log" id="match-log" tabindex="-1" aria-label="Log della partita">
+          <div class="log-heading">
+            <div><small>CRONOLOGIA</small><h2>Log partita</h2></div>
+            <span class="live-indicator">LIVE</span>
+          </div>
+          <ul class="game-log">
+            <li><time>Turno 4</time> Hai pescato <b>Arca della salvezza</b>.</li>
+            <li><time>Turno 3</time> Custode ha evocato <b>Guardiano dello Yin</b>.</li>
+            <li><time>Turno 3</time> <b>Guerriero Santificato</b> ha inflitto 3 Peccato.</li>
+            <li><time>Turno 2</time> Hai giocato <b>Reliquia Solare</b>.</li>
+            <li><time>Turno 2</time> Custode ha terminato il turno.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <aside class="player-panel own-summary" aria-label="Le tue risorse">
+        <div class="identity-row">
+          <div class="avatar player">TU</div>
+          <div>
+            <small>GIOCATORE</small>
+            <h2>Pellegrino</h2>
+          </div>
+        </div>
+        <div class="resource-row">
+          <span><b>7</b> Peccato</span>
+          <span><b>28</b> Deck</span>
+        </div>
+      </aside>
+    </section>
+    <p id="event-message" class="sr-only" aria-live="polite">Pronto.</p>
+  </main>
+
+  <div class="card-context-menu" id="card-context-menu" role="menu" hidden>
+    <div class="context-card-name" id="context-card-name">Carta</div>
+    <button type="button" id="activate-effect-button" role="menuitem">Attiva effetto</button>
+    <button type="button" id="inspect-card-button" role="menuitem">Mostra dettagli</button>
+  </div>
+
+  <dialog id="setup-dialog" class="setup-dialog">
+    <form id="setup-form">
+      <p class="eyebrow">PREPARA IL DUELLO</p>
+      <div class="dialog-heading">
+        <h2>Nuova partita</h2>
+      </div>
+      <p class="setup-intro">Scegli i due contendenti e i loro mazzi. In modalit&agrave; locale il campo ruota automaticamente verso il giocatore di turno.</p>
+
+      <label class="setup-field setup-mode">
+        <span>Modalit&agrave;</span>
+        <select id="game-mode" name="mode">
+          <option value="ai">Giocatore contro CPU</option>
+          <option value="local">Giocatore contro giocatore (locale)</option>
+        </select>
+      </label>
+
+      <div class="setup-players">
+        <fieldset>
+          <legend>Giocatore 1</legend>
+          <label class="setup-field"><span>Nome</span><input id="player-name" name="player_name" value="Pellegrino" maxlength="28"></label>
+          <label class="setup-field"><span>Mazzo</span><select id="player-deck" name="player_deck"></select></label>
+        </fieldset>
+        <fieldset>
+          <legend>Avversario</legend>
+          <label class="setup-field"><span id="opponent-name-label">Nome CPU</span><input id="opponent-name" name="opponent_name" value="Custode" maxlength="28"></label>
+          <label class="setup-field"><span>Mazzo</span><select id="opponent-deck" name="opponent_deck"></select></label>
+        </fieldset>
+      </div>
+      <div class="setup-actions">
+        <button class="button button-quiet" id="setup-deck-editor-button" type="button">Crea / modifica deck</button>
+        <button class="button button-primary setup-start" id="start-game-button" type="submit">Inizia partita</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="deck-editor-dialog" class="deck-editor-dialog">
+    <div class="dialog-heading deck-editor-heading">
+      <div><p class="eyebrow">GESTIONE RELIQUIARIO</p><h2>Deck Editor</h2></div>
+      <button class="icon-button" data-close-dialog aria-label="Chiudi" type="button">&times;</button>
+    </div>
+    <div class="deck-editor-shell">
+      <aside class="deck-library">
+        <div class="deck-library-title"><strong>I tuoi deck</strong><button class="button button-quiet" id="deck-new-button" type="button">Nuovo</button></div>
+        <div id="deck-saved-list" class="deck-saved-list" role="listbox" aria-label="Deck salvati"></div>
+      </aside>
+      <section class="deck-workspace">
+        <div class="deck-identity">
+          <label class="setup-field"><span>Nome deck</span><input id="deck-editor-name" maxlength="48" placeholder="Nome del deck"></label>
+          <label class="setup-field"><span>Religione</span><select id="deck-editor-religion"></select></label>
+          <button class="button button-danger" id="deck-delete-button" type="button" disabled>Elimina</button>
+        </div>
+        <div class="deck-columns">
+          <section class="deck-pane">
+            <div class="deck-pane-heading"><div><small>CATALOGO</small><strong id="deck-catalogue-count">0 carte</strong></div></div>
+            <div class="deck-filters">
+              <input id="deck-search" type="search" placeholder="Cerca una carta..." aria-label="Cerca carta">
+              <select id="deck-type-filter" aria-label="Filtra per tipo"><option value="">Tutti i tipi</option></select>
+              <select id="deck-expansion-filter" aria-label="Filtra per espansione"><option value="">Tutte le espansioni</option></select>
+            </div>
+            <div class="deck-card-list" id="deck-catalogue-list"></div>
+          </section>
+          <section class="deck-pane current-deck-pane">
+            <div class="deck-pane-heading"><div><small>RELIQUIARIO</small><strong id="deck-total">0 / 45 carte</strong></div><span id="deck-validity" class="deck-validity">Incompleto</span></div>
+            <div class="deck-card-list" id="deck-current-list"></div>
+          </section>
+        </div>
+        <div class="deck-editor-footer">
+          <aside class="deck-card-info" id="deck-card-info">
+            <small>DETTAGLI CARTA</small><strong>Seleziona una carta</strong><p>Qui compariranno statistiche ed effetto.</p>
+          </aside>
+          <aside class="deck-rules" id="deck-rules" aria-live="polite">Il reliquiario deve contenere almeno 45 carte.</aside>
+          <div class="deck-save-actions">
+            <button class="button button-quiet" data-close-dialog type="button">Chiudi</button>
+            <button class="button button-primary" id="deck-save-button" type="button">Salva deck</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </dialog>
+
+  <dialog id="help-dialog">
+    <div class="dialog-heading"><h2>Leggere il campo</h2><button class="icon-button" data-close-dialog aria-label="Chiudi" type="button">×</button></div>
+    <ol>
+      <li><b>Avversario in alto, tu in basso.</b> Il colore del territorio rende immediata la distinzione.</li>
+      <li><b>I Santi combattono al centro.</b> Ogni lato ha tre slot Attacco davanti e tre slot Difesa dietro.</li>
+      <li><b>Le colonne sono collegate.</b> Quando un Santo in Attacco lascia il campo, quello in Difesa dietro di lui avanza subito.</li>
+      <li><b>Trascina dalla mano.</b> Gli slot compatibili si illuminano e accettano la carta.</li>
+      <li><b>Il bordo verde segnala un effetto manuale.</b> Usa il tasto destro e scegli “Attiva effetto”.</li>
+      <li><b>Per attaccare trascina un Santo dalla prima linea.</b> I bersagli validi vengono evidenziati in rosso.</li>
+    </ol>
+    <button class="button button-primary" data-close-dialog type="button">Ho capito</button>
+  </dialog>
+
+  <dialog id="pause-dialog" class="pause-dialog">
+    <p class="eyebrow">HOLY WAR</p>
+    <h2>Partita in pausa</h2>
+    <p class="pause-hint">Premi <kbd>ESC</kbd> per tornare al duello.</p>
+    <div class="pause-actions">
+      <button class="button button-primary" id="resume-button" type="button">Riprendi partita</button>
+      <button class="button button-quiet" id="new-game-button" type="button">Nuova partita</button>
+      <button class="button button-quiet" id="pause-deck-editor-button" type="button">Deck Editor</button>
+      <button class="button button-quiet" id="pause-help-button" type="button">Guida del campo</button>
+      <button class="button button-quiet" id="pause-log-button" type="button">Log partita</button>
+      <button class="button button-danger" id="pause-surrender-button" type="button">Abbandona partita</button>
+    </div>
+  </dialog>
+
+  <dialog id="surrender-dialog">
+    <div class="dialog-heading"><h2>Abbandonare la partita?</h2><button class="icon-button" data-close-dialog aria-label="Chiudi" type="button">×</button></div>
+    <p>La partita in corso terminerà e la vittoria verrà assegnata all’avversario.</p>
+    <div class="confirm-actions">
+      <button class="button button-quiet" data-close-dialog type="button">Continua a giocare</button>
+      <button class="button button-danger" id="confirm-surrender-button" type="button">Conferma resa</button>
+    </div>
+  </dialog>
+
+  <dialog id="zone-dialog" class="zone-dialog">
+    <div class="dialog-heading">
+      <div><p class="eyebrow" id="zone-dialog-owner">GIOCATORE</p><h2 id="zone-dialog-title">Cimitero</h2></div>
+      <button class="icon-button" data-close-dialog aria-label="Chiudi" type="button">×</button>
+    </div>
+    <p class="zone-dialog-summary" id="zone-dialog-summary"></p>
+    <div class="zone-browser">
+      <ul class="zone-card-list" id="zone-card-list" aria-label="Carte nella zona"></ul>
+      <aside class="zone-card-detail" id="zone-card-detail" aria-live="polite">
+        <span class="zone-preview-type" id="zone-preview-type">SANTO</span>
+        <h3 id="zone-preview-name">Carta</h3>
+        <div class="zone-preview-stats" id="zone-preview-stats"></div>
+        <div class="zone-preview-effect">
+          <small>EFFETTO</small>
+          <p id="zone-preview-effect"></p>
+        </div>
+      </aside>
+    </div>
+    <button class="button button-primary" data-close-dialog type="button">Chiudi</button>
+  </dialog>
+
+  <dialog id="effect-selection-dialog" class="effect-selection-dialog">
+    <form id="effect-selection-form">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SCELTA EFFETTO</p><h2 id="effect-selection-title">Seleziona le carte</h2></div>
+        <button class="icon-button" data-close-dialog aria-label="Annulla" type="button">&times;</button>
+      </div>
+      <p class="effect-selection-summary" id="effect-selection-summary"></p>
+      <div class="effect-selection-body">
+        <div class="effect-selection-steps" id="effect-selection-steps"></div>
+        <aside class="effect-choice-preview" id="effect-choice-preview" aria-live="polite">
+          <span class="effect-preview-type">ANTEPRIMA CARTA</span>
+          <h3>Passa sopra una carta</h3>
+          <div class="effect-preview-stats"></div>
+          <div class="effect-preview-text"><small>EFFETTO</small><p>Qui vedrai tutte le informazioni della carta prima di selezionarla.</p></div>
+        </aside>
+      </div>
+      <div class="confirm-actions">
+        <button class="button button-quiet" data-close-dialog type="button">Annulla</button>
+        <button class="button button-primary" id="confirm-effect-selection" type="submit">Conferma selezione</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="runtime-decision-dialog" class="effect-selection-dialog">
+    <form id="runtime-decision-form">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">RISOLUZIONE EFFETTO</p><h2 id="runtime-decision-title">Scelta richiesta</h2></div>
+      </div>
+      <p class="effect-selection-summary" id="runtime-decision-prompt"></p>
+      <div class="effect-selection-body">
+        <div class="effect-choice-list runtime-choice-list" id="runtime-decision-options"></div>
+        <aside class="effect-choice-preview" id="runtime-choice-preview" aria-live="polite">
+          <span class="effect-preview-type">ANTEPRIMA CARTA</span>
+          <h3>Passa sopra una carta</h3>
+          <div class="effect-preview-stats"></div>
+          <div class="effect-preview-text"><small>EFFETTO</small><p>Qui vedrai tutte le informazioni della carta prima di selezionarla.</p></div>
+        </aside>
+      </div>
+      <div class="confirm-actions">
+        <button class="button button-quiet" id="cancel-runtime-decision" type="button" hidden>Annulla</button>
+        <button class="button button-primary" id="confirm-runtime-decision" type="submit">Conferma</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="live.js"></script>
+</body>
+</html>

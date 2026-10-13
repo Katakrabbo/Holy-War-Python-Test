@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 import json
+import re
 import unicodedata
 
 from holywar.app_paths import appdata_dir, bundled_data_dir
@@ -156,6 +157,130 @@ def runtime_premade_decks() -> list[dict]:
         )
     out.sort(key=lambda d: (str(d.get("religion", "")), str(d.get("name", ""))))
     return out
+
+
+def max_copies_for_crosses(crosses: str) -> int:
+    """Return the copy limit used by the legacy deck editor."""
+    raw = str(crosses or "").strip().lower()
+    if raw in {"white", "croce bianca"}:
+        value = 11
+    else:
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            return 1
+    if 1 <= value <= 3:
+        return 5
+    if 4 <= value <= 6:
+        return 3
+    return 1
+
+
+def validate_deck_cards(cards: list[CardDefinition], entries: list[dict]) -> dict:
+    """Validate a deck with the same limits as the legacy desktop editor."""
+    by_name = {_norm(card.name): card for card in cards}
+    normalized: dict[str, tuple[CardDefinition, int]] = {}
+    errors: list[str] = []
+    notes: list[str] = []
+    stats = {"band_13": 0, "band_46": 0, "band_79": 0, "band_10": 0, "band_white": 0, "innata": 0}
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        try:
+            qty = int(entry.get("qty", 0))
+        except (TypeError, ValueError):
+            qty = 0
+        if not name or qty <= 0:
+            continue
+        card = by_name.get(_norm(name))
+        if card is None:
+            errors.append(f"Carta non trovata nel catalogo: {name}")
+            continue
+        key = _norm(card.name)
+        previous = normalized.get(key)
+        normalized[key] = (card, qty + (previous[1] if previous else 0))
+
+    total = sum(qty for _card, qty in normalized.values())
+    if total < 45:
+        errors.append(f"Carte nel reliquiario insufficienti: {total}/45 (minimo 45).")
+
+    for card, qty in sorted(normalized.values(), key=lambda item: _norm(item[0].name)):
+        maximum = max_copies_for_crosses(card.crosses)
+        if qty > maximum:
+            errors.append(f"{card.name}: {qty} copie (max {maximum}).")
+        if card.card_type.strip().lower() == "innata":
+            stats["innata"] += qty
+            notes.append(f"{card.name} e Innata: usarla solo in deck tematici.")
+        raw = str(card.crosses or "").strip().lower()
+        try:
+            value = 11 if raw in {"white", "croce bianca"} else int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 3:
+            stats["band_13"] += qty
+        elif 4 <= value <= 6:
+            stats["band_46"] += qty
+        elif 7 <= value <= 9:
+            stats["band_79"] += qty
+        elif value == 10:
+            stats["band_10"] += qty
+        elif value >= 11:
+            stats["band_white"] += qty
+
+    if stats["band_79"] > 10:
+        errors.append(f"Carte 7-9 Croci: {stats['band_79']}/10 (massimo 10).")
+    if stats["band_10"] > 3:
+        errors.append(f"Carte 10 Croci: {stats['band_10']}/3 (massimo 3).")
+    if stats["band_white"] > 1:
+        errors.append(f"Carte Croce Bianca: {stats['band_white']}/1 (massimo 1).")
+
+    payload = [{"name": card.name, "qty": qty} for card, qty in normalized.values()]
+    payload.sort(key=lambda item: _norm(item["name"]))
+    return {"valid": not errors, "errors": errors, "notes": notes, "total": total, "stats": stats, "cards": payload}
+
+
+def save_runtime_deck(
+    cards: list[CardDefinition], *, deck_id: str | None, name: str, religion: str, entries: list[dict]
+) -> dict:
+    """Validate and persist a deck in the store already used by the desktop UI."""
+    name = str(name or "").strip()
+    religion = str(religion or "").strip()
+    if not name:
+        raise ValueError("Inserisci un nome deck.")
+    if not religion:
+        raise ValueError("Seleziona una religione.")
+    if religion not in available_religions(cards):
+        raise ValueError("Religione non valida.")
+    report = validate_deck_cards(cards, entries)
+    if not report["valid"]:
+        raise ValueError("\n".join(report["errors"]))
+
+    resolved_id = str(deck_id or "").strip()
+    if not resolved_id:
+        base = re.sub(r"[^a-z0-9_]+", "_", _norm(name).replace(" ", "_")).strip("_") or "deck"
+        resolved_id = f"user_{base}"
+        suffix = 2
+        while resolved_id in _RUNTIME_PREMADE_DECKS:
+            resolved_id = f"user_{base}_{suffix}"
+            suffix += 1
+    _RUNTIME_PREMADE_DECKS[resolved_id] = {
+        "religion": religion,
+        "name": name,
+        "cards": [(item["name"], item["qty"]) for item in report["cards"]],
+        "allow_over_45": True,
+    }
+    export_premades_json(PREMADE_STORE_PATH)
+    return get_runtime_premade(resolved_id) or {}
+
+
+def delete_runtime_deck(deck_id: str) -> bool:
+    """Delete a persisted deck, mirroring the legacy editor's delete action."""
+    removed = _RUNTIME_PREMADE_DECKS.pop(str(deck_id), None) is not None
+    if removed:
+        export_premades_json(PREMADE_STORE_PATH)
+    return removed
 
 
 def get_premade_label(deck_id: str) -> str:

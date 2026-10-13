@@ -16,6 +16,15 @@ pip install -e .[dev]
 .\.venv\Scripts\python.exe -m holywar.gui --cards-json "holywar/data/cards.json"
 ```
 
+### Nuova interfaccia web locale
+
+```powershell
+.\.venv\Scripts\python.exe -m holywar.web --cards-json "holywar/data/cards.json"
+```
+
+Il comando apre `http://127.0.0.1:5174/` e mantiene tutte le regole nel motore Python.
+Per non aprire automaticamente il browser aggiungi `--no-browser`.
+
 Se vuoi usare deck premade custom, aggiungi `--premades-json "my_premades.json"` al comando.
 
 I deck creati/modificati da GUI vengono salvati in:

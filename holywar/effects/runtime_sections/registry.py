@@ -441,7 +441,7 @@ class RuntimeRegistryMixin:
     def ensure_all_cards_migrated(self, engine: GameEngine) -> None:
         if not self._scripts:
             self._bootstrap_from_cards_json()
-        self._bootstrap_from_script_files()
+            self._bootstrap_from_script_files()
         for inst in engine.state.instances.values():
             key = _norm(inst.definition.name)
             if key not in self._scripts:
