@@ -21,6 +21,7 @@ dev = [
 holywar = "holywar.cli:main"
 holywar-gui = "holywar.gui:main"
 holywar-web = "holywar.web:main"
+holywar-validate = "holywar.validation:main"
 
 [tool.setuptools.packages.find]
 include = ["holywar*"]

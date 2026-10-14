@@ -247,6 +247,27 @@ class RuntimeEffectsCombatMixin:
                     )
                     engine.send_to_graveyard(inst.owner, t_uid)
                 return True
+            if action == "destroy_equipped_target_and_excommunicate_source":
+                source_inst = engine.state.instances.get(source_uid)
+                equipped_uid = self._clear_equipment_link(engine, source_uid)
+                equipped_inst = engine.state.instances.get(equipped_uid or "")
+                if equipped_uid and equipped_inst is not None and self._is_uid_on_field(engine, equipped_uid):
+                    engine.destroy_saint_by_uid(equipped_inst.owner, equipped_uid, cause="effect")
+                if source_inst is not None:
+                    self._move_uid_to_zone(
+                        engine,
+                        source_uid,
+                        "excommunicated",
+                        source_inst.owner,
+                    )
+                    engine._emit_event(
+                        "on_card_excommunicated",
+                        source_inst.owner,
+                        card=source_uid,
+                        from_zone="equipped",
+                        owner=source_inst.owner,
+                    )
+                return True
             if action == "absorb_target_stats_and_link":
                 source_inst = engine.state.instances.get(source_uid)
                 if source_inst is None:

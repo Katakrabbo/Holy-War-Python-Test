@@ -21,6 +21,25 @@ class RuntimeEffectsResourcesMixin:
         effect: EffectSpec,
         action: str,
     ) -> bool:
+        if action == "inflict_sin_to_event_controller":
+            raw_controller = engine.state.flags.get("_runtime_event_controller", owner_idx)
+            try:
+                target = int(raw_controller)
+            except (TypeError, ValueError):
+                target = owner_idx
+            if target not in {0, 1}:
+                target = owner_idx
+            amount = max(0, int(effect.amount))
+            engine.gain_sin(target, amount)
+            if amount > 0:
+                engine._emit_event(
+                    "on_sin_inflicted",
+                    owner_idx,
+                    card=source_uid,
+                    target_player=target,
+                    amount=amount,
+                )
+            return True
         if action == "inflict_sin":
             target = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
             amount = max(0, int(effect.amount))

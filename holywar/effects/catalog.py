@@ -13,6 +13,9 @@ from holywar.scripting_api import DECLARED_FUNCTIONS, RuleEvents
 
 # This module defines the canonical sets of events, functions, conditions, and actions that are recognized by the Holy War game engine. It also includes a backlog of target IDs for coverage tracking and a `CoverageSnapshot` dataclass to represent the current state of implementation coverage. The `validate_registered_scripts` function checks the currently registered card scripts against the canonical sets and identifies any unknown events, actions, or condition keys that are being used in the scripts.
 CANONICAL_EVENTS: set[str] = set(RuleEvents.ALL) | {
+    "on_preparation_complete",
+    "on_sin_inflicted",
+    "on_sin_removed",
     "on_card_sent_to_reliquiary",
     "on_card_returned_to_reliquiary",
     "on_card_shuffled_into_reliquiary",

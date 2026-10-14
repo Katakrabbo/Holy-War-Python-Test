@@ -1659,7 +1659,7 @@
     "crosses": "",
     "faith": 5,
     "strength": 0,
-    "effect_text": "(nessun effetto)",
+    "effect_text": "Quando questo Token viene distrutto, il suo controllore riceve 5 Peccato.",
     "expansion": "ANI-1",
     "is_token": true,
     "aliases": []

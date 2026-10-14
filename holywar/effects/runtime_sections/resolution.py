@@ -786,7 +786,13 @@ class RuntimeResolutionMixin:
             # The handler function defined here is responsible for checking if the trigger conditions are met when the specified event occurs. It verifies if the source of the event is still on the field (if required by the trigger), checks if the event is happening during the correct player's turn, and evaluates any additional conditions specified in the trigger. If all conditions are met, it resolves the effect associated with the trigger. The handler also logs the trigger activation and manages runtime flags to keep track of the event context during resolution.
             def _handler(ctx: RuleEventContext, _te=te, _owner=owner_idx, _source=source_uid, _event_name=event_name):
                 if _event_name not in allow_source_off_field and not self._is_uid_on_field(ctx.engine, _source):
-                    return
+                    source_inst = ctx.engine.state.instances.get(_source)
+                    is_equipped = bool(
+                        source_inst
+                        and any(str(tag).startswith("equipped_to:") for tag in source_inst.blessed)
+                    )
+                    if not is_equipped:
+                        return
                 if _te.trigger.event in {"on_my_turn_start", "on_my_turn_end"} and ctx.player_idx != _owner:
                     return
                 if _te.trigger.event in {"on_opponent_turn_start", "on_opponent_turn_end"} and ctx.player_idx != (1 - _owner):
@@ -826,6 +832,9 @@ class RuntimeResolutionMixin:
                 )
                 ctx.engine.state.flags["_runtime_event_source"] = str(ctx.payload.get("source", ""))
                 ctx.engine.state.flags["_runtime_event_amount"] = str(ctx.payload.get("amount", ""))
+                ctx.engine.state.flags["_runtime_event_controller"] = str(
+                    ctx.payload.get("controller", ctx.player_idx)
+                )
                 ctx.engine.state.flags["_runtime_event_name"] = str(ctx.event)
                 ctx.engine.state.flags["_runtime_source_card"] = _source
                 try:
@@ -878,6 +887,7 @@ class RuntimeResolutionMixin:
                     ctx.engine.state.flags.pop("_runtime_event_card", None)
                     ctx.engine.state.flags.pop("_runtime_event_source", None)
                     ctx.engine.state.flags.pop("_runtime_event_amount", None)
+                    ctx.engine.state.flags.pop("_runtime_event_controller", None)
                     ctx.engine.state.flags.pop("_runtime_event_name", None)
                     ctx.engine.state.flags.pop("_runtime_source_card", None)
 

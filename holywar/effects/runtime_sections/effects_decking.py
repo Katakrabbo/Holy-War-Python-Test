@@ -16,6 +16,8 @@ class RuntimeEffectsDeckingMixin:
         def _get_zone_cards(self, engine: GameEngine, owner_idx: int, zone_name: str) -> list[str]: ...
         def _move_uid_to_zone(self, engine: GameEngine, uid: str, to_zone: str, owner_idx: int) -> bool: ...
         def _shuffle_graveyard_if_oltretomba_active(self, engine: GameEngine, player_idx: int) -> None: ...
+        def _selected_target_raw_for_current_action(self, engine: GameEngine) -> str: ...
+        def _is_uid_on_field(self, engine: GameEngine, uid: str) -> bool: ...
 
     def _apply_effect_deck_action(
         self,
@@ -26,6 +28,47 @@ class RuntimeEffectsDeckingMixin:
         effect: EffectSpec,
         action: str,
     ) -> bool:
+        if action == "resolve_monsone_payload":
+            raw = self._selected_target_raw_for_current_action(engine)
+            if raw.startswith("monsone:"):
+                raw = raw.split(":", 1)[1]
+            selections: dict[str, list[str]] = {"discard": [], "return": []}
+            for part in raw.split(";"):
+                if "=" not in part:
+                    continue
+                key, values = part.split("=", 1)
+                key = key.strip().lower()
+                if key in selections:
+                    selections[key] = [uid.strip() for uid in values.split(",") if uid.strip()]
+
+            player = engine.state.players[owner_idx]
+            discarded = 0
+            for uid in selections["discard"][:3]:
+                if uid not in player.hand or uid == source_uid:
+                    continue
+                engine.send_to_graveyard(owner_idx, uid, from_zone_override="hand")
+                discarded += 1
+            while discarded < 3 and player.deck:
+                uid = player.deck[-1]
+                engine.send_to_graveyard(owner_idx, uid, from_zone_override="deck")
+                discarded += 1
+
+            for uid in selections["return"][:3]:
+                inst = engine.state.instances.get(uid)
+                if inst is None or not self._is_uid_on_field(engine, uid):
+                    continue
+                try:
+                    crosses = int(float(inst.definition.crosses))
+                except (TypeError, ValueError):
+                    continue
+                if crosses > 8:
+                    continue
+                card_owner = int(inst.owner)
+                if self._move_uid_to_zone(engine, uid, "relicario", card_owner):
+                    engine.state.log(f"{inst.definition.name} torna nel reliquiario.")
+            for player_idx in (0, 1):
+                engine.rng.shuffle(engine.state.players[player_idx].deck)
+            return True
         if action == "mill_cards":
             target = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
             player = engine.state.players[target]

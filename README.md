@@ -23,6 +23,14 @@ In alternativa:
 Il comando apre `http://127.0.0.1:5174/` e mantiene tutte le regole nel motore Python.
 Per non aprire automaticamente il browser aggiungi `--no-browser`.
 
+Prima di aggiungere o modificare carte puoi controllare dati e script senza avviare una partita:
+
+```powershell
+.\.venv\Scripts\python.exe -m holywar.validation
+```
+
+Il comando non modifica alcun file: termina con codice `1` se trova errori strutturali e distingue gli avvisi non bloccanti.
+
 Se vuoi usare deck premade custom, aggiungi `--premades-json "my_premades.json"` al comando.
 
 I deck creati/modificati da GUI vengono salvati in:
