@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Concept locale dell'interfaccia TCG di Holy War">
-  <title>Holy War — TCG UI Concept</title>
+  <meta name="description" content="Interfaccia locale del gioco di carte Holy War">
+  <title>Holy War</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -13,14 +13,14 @@
   <main class="app-shell">
     <header class="topbar">
       <div class="brand-block">
-        <p class="eyebrow">PROTOTIPO INTERFACCIA</p>
+        <p class="eyebrow">GIOCO DI CARTE</p>
         <h1>HOLY WAR</h1>
       </div>
       <div class="turn-summary" aria-live="polite">
         <span class="turn-dot"></span>
         <div>
-          <strong id="turn-label">Il tuo turno</strong>
-          <small id="phase-label">Fase principale · Turno 4</small>
+          <strong id="turn-label">Caricamento partita</strong>
+          <small id="phase-label">Preparazione</small>
         </div>
       </div>
       <div class="top-actions">
@@ -39,23 +39,23 @@
           <div class="avatar cpu">AI</div>
           <div>
             <small>AVVERSARIO</small>
-            <h2>Custode</h2>
+            <h2>Avversario</h2>
           </div>
         </div>
         <div class="resource-row">
-          <span><b>12</b> Peccato</span>
-          <span><b>31</b> Deck</span>
+          <span><b>0</b> Peccato</span>
+          <span><b>0</b> Deck</span>
         </div>
       </aside>
 
       <aside class="match-tools" aria-label="Risorsa attiva e comandi partita">
         <div class="inspiration-heading">
           <small>ISPIRAZIONE ATTIVA</small>
-          <strong id="inspiration-owner">Pellegrino</strong>
+          <strong id="inspiration-owner">Giocatore</strong>
         </div>
         <div class="inspiration-gauge" id="inspiration-gauge" style="--value: 90" role="progressbar"
-          aria-label="Ispirazione rimanente" aria-valuemin="0" aria-valuemax="10" aria-valuenow="9">
-          <div class="gauge-center"><strong id="inspiration-value">9</strong><span>/10</span></div>
+          aria-label="Ispirazione rimanente" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0">
+          <div class="gauge-center"><strong id="inspiration-value">0</strong><span>/10</span></div>
         </div>
         <div class="side-actions">
           <button class="button button-primary" id="chain-pass-button" type="button" hidden>Passa priorità</button>
@@ -71,11 +71,7 @@
             <span>Rilascia qui il Santo</span>
           </div>
           <div class="enemy-hand" aria-label="Mano avversario">
-            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
-            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
-            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
-            <article class="card card-back" aria-label="Carta avversaria coperta"></article>
-            <span class="zone-caption">Mano avversario · 4 carte</span>
+            <span class="zone-caption">Mano avversario</span>
           </div>
         </div>
 
@@ -85,20 +81,20 @@
             <div class="field-side-group">
               <span class="side-owner">Avversario</span>
               <div class="zone-stack" aria-label="Zone avversario">
-                <div class="zone-slot compact"><span>Deck</span><b>31</b></div>
+                <div class="zone-slot compact"><span>Deck</span><b>0</b></div>
                 <button class="zone-slot compact inspectable-zone" data-zone-owner="opponent" data-zone-kind="graveyard"
-                  data-deck-replacement="false" type="button"><span>Cimitero</span><b>6</b></button>
+                  data-deck-replacement="false" type="button"><span>Cimitero</span><b>0</b></button>
                 <button class="zone-slot compact inspectable-zone" data-zone-owner="opponent"
                   data-zone-kind="excommunicated" data-deck-replacement="false"
-                  type="button"><span>Scomunicate</span><b>1</b></button>
+                  type="button"><span>Scomunicate</span><b>0</b></button>
               </div>
             </div>
             <div class="field-side-group">
               <span class="side-owner">Tu</span>
               <div class="zone-stack" aria-label="Le tue zone">
-                <div class="zone-slot compact"><span>Deck</span><b>28</b></div>
+                <div class="zone-slot compact"><span>Deck</span><b>0</b></div>
                 <button class="zone-slot compact inspectable-zone" data-zone-owner="player" data-zone-kind="graveyard"
-                  data-deck-replacement="false" type="button"><span>Cimitero</span><b>3</b></button>
+                  data-deck-replacement="false" type="button"><span>Cimitero</span><b>0</b></button>
                 <button class="zone-slot compact inspectable-zone" data-zone-owner="player"
                   data-zone-kind="excommunicated" data-deck-replacement="false"
                   type="button"><span>Scomunicate</span><b>0</b></button>
@@ -109,13 +105,7 @@
           <div class="saint-formations">
             <div class="formation-row enemy-defense-line">
               <div class="row-label"><b>DIFESA</b><span>Seconda linea</span></div>
-              <div class="unit-row" aria-label="Santi avversari in difesa">
-                <button class="game-card saint enemy-card reserve-card" data-card="enemy-guardiano" type="button">
-                  <strong>Guardiano dello Yin</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
-                </button>
-                <div class="empty-slot unit"><span>Difesa 2</span></div>
-                <div class="empty-slot unit"><span>Difesa 3</span></div>
-              </div>
+              <div class="unit-row" aria-label="Santi avversari in difesa"></div>
             </div>
 
             <div class="lane-connectors enemy-connectors" aria-hidden="true"><span>↓</span><span>↓</span><span>↓</span>
@@ -123,15 +113,7 @@
 
             <div class="formation-row enemy-attack-line">
               <div class="row-label attack-label"><b>ATTACCO</b><span>Prima linea</span></div>
-              <div class="unit-row" aria-label="Santi avversari in attacco">
-                <button class="game-card saint enemy-card" data-card="enemy-araldo" type="button">
-                  <strong>Araldo della Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
-                </button>
-                <button class="game-card saint enemy-card" data-card="custode" type="button">
-                  <strong>Custode dei Sigilli</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
-                </button>
-                <div class="empty-slot unit"><span>Attacco 3</span></div>
-              </div>
+              <div class="unit-row" aria-label="Santi avversari in attacco"></div>
             </div>
 
             <div class="field-divider">
@@ -142,15 +124,7 @@
 
             <div class="formation-row player-attack-line">
               <div class="row-label attack-label"><b>ATTACCO</b><span>Prima linea</span></div>
-              <div class="unit-row" aria-label="I tuoi Santi in attacco">
-                <button class="game-card saint own-card" data-card="guerriero" type="button">
-                  <strong>Guerriero Santificato</strong><span class="stats">✦ 5&nbsp;&nbsp; ◈ 4</span>
-                </button>
-                <div class="empty-slot unit valid-target"><span>Attacco 2</span><em>Gioca qui</em></div>
-                <button class="game-card saint own-card" data-card="own-araldo" type="button">
-                  <strong>Araldo della Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
-                </button>
-              </div>
+              <div class="unit-row" aria-label="I tuoi Santi in attacco"></div>
             </div>
 
             <div class="lane-connectors player-connectors" aria-hidden="true"><span>↑</span><span>↑</span><span>↑</span>
@@ -158,37 +132,16 @@
 
             <div class="formation-row player-defense-line">
               <div class="row-label"><b>DIFESA</b><span>Seconda linea</span></div>
-              <div class="unit-row" aria-label="I tuoi Santi in difesa">
-                <button class="game-card saint own-card reserve-card" data-card="own-guardiano" type="button">
-                  <strong>Guardiano dello Yin</strong><span class="stats">✦ 3&nbsp;&nbsp; ◈ 6</span>
-                </button>
-                <div class="empty-slot unit valid-target"><span>Difesa 2</span><em>Gioca qui</em></div>
-                <div class="empty-slot unit"><span>Difesa 3</span></div>
-              </div>
+              <div class="unit-row" aria-label="I tuoi Santi in difesa"></div>
             </div>
           </div>
 
           <div class="field-supports" aria-label="Artefatti ed edifici">
             <div class="field-side-group">
-              <div class="support-grid enemy-support" aria-label="Supporti avversario">
-                <button class="mini-card artifact artifact-top-left" data-card="acqua"
-                  type="button"><span>Acqua</span></button>
-                <div class="empty-slot artifact-top-right" aria-label="Slot artefatto libero"></div>
-                <button class="mini-card building building-tall" data-card="altare" type="button"><span>Altare dei Sette
-                    Sigilli</span></button>
-                <div class="empty-slot artifact-bottom-left" aria-label="Slot artefatto libero"></div>
-                <div class="empty-slot artifact-bottom-right" aria-label="Slot artefatto libero"></div>
-              </div>
+              <div class="support-grid enemy-support" aria-label="Supporti avversario"></div>
             </div>
             <div class="field-side-group">
-              <div class="support-grid own-support" aria-label="I tuoi supporti">
-                <button class="mini-card artifact artifact-top-left" data-card="reliquia" type="button"><span>Reliquia
-                    Solare</span></button>
-                <div class="empty-slot artifact-top-right" aria-label="Slot artefatto libero"></div>
-                <div class="empty-slot building-slot building-tall" aria-label="Slot edificio libero"></div>
-                <div class="empty-slot artifact-bottom-left" aria-label="Slot artefatto libero"></div>
-                <div class="empty-slot artifact-bottom-right" aria-label="Slot artefatto libero"></div>
-              </div>
+              <div class="support-grid own-support" aria-label="I tuoi supporti"></div>
             </div>
           </div>
         </div>
@@ -199,28 +152,7 @@
               <span class="zone-title">La tua mano</span>
               <span class="hand-interaction-hint">Passa qui per aprire</span>
             </div>
-            <div class="hand-cards" style="--hand-count: 5">
-              <button class="game-card hand-card selected" data-card="arca" type="button">
-                <small>MALEDIZIONE · <i class="inspiration-symbol" aria-hidden="true"></i> 8</small><strong>Arca della
-                  salvezza</strong><span class="card-hint">Selezionata</span>
-              </button>
-              <button class="game-card hand-card" data-card="acqua" type="button">
-                <small>ARTEFATTO · <i class="inspiration-symbol" aria-hidden="true"></i>
-                  2</small><strong>Acqua</strong><span class="card-hint">Seleziona</span>
-              </button>
-              <button class="game-card hand-card" data-card="araldo" type="button">
-                <small>SANTO · <i class="inspiration-symbol" aria-hidden="true"></i> 6</small><strong>Araldo della
-                  Fine</strong><span class="stats">✦ 4&nbsp;&nbsp; ◈ 5</span>
-              </button>
-              <button class="game-card hand-card" data-card="cura" type="button">
-                <small>BENEDIZIONE · <i class="inspiration-symbol" aria-hidden="true"></i> 3</small><strong>Cura
-                  Rapida</strong><span class="card-hint">Seleziona</span>
-              </button>
-              <button class="game-card hand-card" data-card="foresta" type="button">
-                <small>EDIFICIO · <i class="inspiration-symbol" aria-hidden="true"></i> 5</small><strong>Foresta
-                  Sacra</strong><span class="card-hint">Seleziona</span>
-              </button>
-            </div>
+            <div class="hand-cards" style="--hand-count: 1"></div>
           </div>
         </div>
 
@@ -243,16 +175,16 @@
             <button class="icon-button" id="close-inspector" aria-label="Chiudi dettaglio" type="button">×</button>
           </div>
 
-          <div class="card-preview curse" id="card-preview">
-            <span class="preview-type" id="preview-type">MALEDIZIONE</span>
+          <div class="card-preview" id="card-preview">
+            <span class="preview-type" id="preview-type">CARTA</span>
             <div class="preview-symbol">HW</div>
-            <h2 id="preview-name">Arca della salvezza</h2>
-            <div class="preview-stats" id="preview-stats"><span>Costo <b>8</b></span></div>
+            <h2 id="preview-name">Nessuna carta selezionata</h2>
+            <div class="preview-stats" id="preview-stats"></div>
           </div>
 
           <div class="effect-box">
             <small>EFFETTO</small>
-            <p id="preview-effect">Scegli due Santi sul campo. Distruggi tutti gli altri Santi.</p>
+            <p id="preview-effect">Seleziona una carta per consultarne l'effetto.</p>
           </div>
 
         </div>
@@ -264,13 +196,7 @@
             </div>
             <span class="live-indicator">LIVE</span>
           </div>
-          <ul class="game-log">
-            <li><time>Turno 4</time> Hai pescato <b>Arca della salvezza</b>.</li>
-            <li><time>Turno 3</time> Custode ha evocato <b>Guardiano dello Yin</b>.</li>
-            <li><time>Turno 3</time> <b>Guerriero Santificato</b> ha inflitto 3 Peccato.</li>
-            <li><time>Turno 2</time> Hai giocato <b>Reliquia Solare</b>.</li>
-            <li><time>Turno 2</time> Custode ha terminato il turno.</li>
-          </ul>
+          <ul class="game-log"></ul>
         </section>
       </aside>
 
@@ -279,12 +205,12 @@
           <div class="avatar player">TU</div>
           <div>
             <small>GIOCATORE</small>
-            <h2>Pellegrino</h2>
+            <h2>Giocatore</h2>
           </div>
         </div>
         <div class="resource-row">
-          <span><b>7</b> Peccato</span>
-          <span><b>28</b> Deck</span>
+          <span><b>0</b> Peccato</span>
+          <span><b>0</b> Deck</span>
         </div>
       </aside>
     </section>

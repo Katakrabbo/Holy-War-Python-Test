@@ -16,7 +16,7 @@ if not exist "%HOLYWAR_PYTHON%" (
     if errorlevel 1 goto :errore
 )
 
-"%HOLYWAR_PYTHON%" -c "import openpyxl" >nul 2>&1
+"%HOLYWAR_PYTHON%" -B -c "import openpyxl" >nul 2>&1
 if errorlevel 1 (
     echo Installazione delle dipendenze...
     "%HOLYWAR_PYTHON%" -m pip install -e .
@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 
 echo Avvio di Holy War...
-"%HOLYWAR_PYTHON%" -m holywar.web --cards-json "holywar\data\cards.json"
+"%HOLYWAR_PYTHON%" -B -m holywar.web --cards-json "holywar\data\cards.json"
 exit /b %errorlevel%
 
 :errore
