@@ -12,8 +12,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 from holywar.ai.simple_ai import choose_action
-from holywar.app_paths import bundled_data_dir
+from holywar.app_paths import bundled_data_dir, bundled_project_root
 from holywar.core.engine import GameEngine
+from holywar.core.state import CardInstance, PlayerState
 from holywar.data.deck_builder import (
     available_premade_decks,
     available_religions,
@@ -27,6 +28,7 @@ from holywar.data.deck_builder import (
 from holywar.data.importer import load_cards_json
 from holywar.effects.runtime import runtime_cards
 from holywar.effects.runtime import CardFilterSpec, TargetSpec
+from holywar.effects.library import resolve_card_effect
 from holywar.scripting_api import RuleEventContext
 
 
@@ -292,6 +294,175 @@ class WebGameSession:
             self.engine.start_turn()
             return self.snapshot(message="Nuova partita avviata.")
 
+    def test_editor(self) -> dict[str, Any]:
+        unique: dict[str, Any] = {}
+        for card in self.cards:
+            key = card.name.strip().casefold()
+            if key and key not in unique:
+                unique[key] = card
+        return {
+            "cards": [
+                {
+                    **card.to_dict(),
+                    "max_copies": (99 if card.card_type.strip().lower() == "token" else max_copies_for_crosses(card.crosses)),
+                }
+                for card in sorted(unique.values(), key=lambda item: item.name.casefold())
+            ],
+            "zones": {
+                "deck": None, "hand": None, "graveyard": None, "excommunicated": None,
+                "attack": 3, "defense": 3, "artifacts": 4, "building": 1,
+                "innate": 1,
+            },
+        }
+
+    def start_test_game(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            mode = str(payload.get("mode") or "ai").strip().lower()
+            if mode not in {"ai", "local"}:
+                raise ValueError("Modalita test sconosciuta.")
+            active_player = int(payload.get("active_player", 0))
+            if active_player not in {0, 1}:
+                raise ValueError("Giocatore iniziale non valido.")
+            raw_players = payload.get("players")
+            if not isinstance(raw_players, list) or len(raw_players) != 2:
+                raise ValueError("Configura entrambi i lati della partita.")
+
+            by_name = {card.name.strip().casefold(): card for card in self.cards}
+            instance_counter = 0
+            instances: dict[str, CardInstance] = {}
+            innate_uids: dict[int, list[str]] = {0: [], 1: []}
+
+            def create_instance(name: str, owner: int) -> str:
+                nonlocal instance_counter
+                definition = by_name.get(str(name or "").strip().casefold())
+                if definition is None:
+                    raise ValueError(f"Carta non trovata: {name}")
+                instance_counter += 1
+                uid = f"test{instance_counter:05d}"
+                copied = type(definition).from_dict(definition.to_dict())
+                instances[uid] = CardInstance(
+                    uid=uid, definition=copied, owner=owner,
+                    current_faith=copied.faith if copied.faith is not None else None,
+                )
+                return uid
+
+            def names(raw: Any) -> list[str]:
+                if not isinstance(raw, list):
+                    return []
+                return [str(value).strip() for value in raw if str(value).strip()]
+
+            def slot_names(raw: Any, limit: int) -> list[str | None]:
+                values = raw if isinstance(raw, list) else []
+                if len(values) > limit:
+                    raise ValueError("Una zona del terreno contiene troppe carte.")
+                out: list[str | None] = []
+                for value in values:
+                    name = str(value or "").strip()
+                    out.append(name or None)
+                return out + [None] * (limit - len(out))
+
+            def build_player(owner: int, raw: Any) -> PlayerState:
+                if not isinstance(raw, dict):
+                    raise ValueError("Configurazione lato non valida.")
+                player = PlayerState.empty(str(raw.get("name") or ("Pellegrino" if owner == 0 else "Custode")))
+                collections = {
+                    "deck": names(raw.get("deck")),
+                    "hand": names(raw.get("hand")),
+                    "graveyard": names(raw.get("graveyard")),
+                    "excommunicated": names(raw.get("excommunicated")),
+                }
+                slots = {
+                    "attack": slot_names(raw.get("attack"), 3),
+                    "defense": slot_names(raw.get("defense"), 3),
+                    "artifacts": slot_names(raw.get("artifacts"), 4),
+                    "building": slot_names(raw.get("building"), 1),
+                    "innate": slot_names(raw.get("innate"), 1),
+                }
+
+                all_names = [name for group in (*collections.values(), *slots.values()) for name in group if name]
+                counts: dict[str, int] = {}
+                for name in all_names:
+                    card = by_name.get(name.casefold())
+                    if card is None:
+                        raise ValueError(f"Carta non trovata: {name}")
+                    key = card.name.casefold()
+                    counts[key] = counts.get(key, 0) + 1
+                    maximum = 99 if card.card_type.strip().lower() == "token" else max_copies_for_crosses(card.crosses)
+                    if counts[key] > maximum:
+                        raise ValueError(f"{card.name}: {counts[key]} copie (max {maximum}).")
+
+                for zone, zone_names in collections.items():
+                    setattr(player, zone, [create_instance(name, owner) for name in zone_names])
+                for zone in ("attack", "defense", "artifacts"):
+                    zone_uids: list[str | None] = []
+                    expected = {"attack": {"santo", "token"}, "defense": {"santo", "token"}, "artifacts": {"artefatto"}}[zone]
+                    for name in slots[zone]:
+                        if name is None:
+                            zone_uids.append(None)
+                            continue
+                        card = by_name[name.casefold()]
+                        if card.card_type.strip().lower() not in expected:
+                            raise ValueError(f"{card.name} non puo essere inserita in {zone}.")
+                        zone_uids.append(create_instance(name, owner))
+                    setattr(player, zone, zone_uids)
+                if slots["building"]:
+                    building_name = slots["building"][0]
+                    if building_name is not None:
+                        card = by_name[building_name.casefold()]
+                        if card.card_type.strip().lower() != "edificio":
+                            raise ValueError(f"{card.name} non e un Edificio.")
+                        player.building = create_instance(card.name, owner)
+                innate_name = slots["innate"][0]
+                if innate_name is not None:
+                    card = by_name[innate_name.casefold()]
+                    if card.card_type.strip().lower() != "innata":
+                        raise ValueError(f"{card.name} non e una carta Innata.")
+                    innate_uids[owner].append(create_instance(card.name, owner))
+                player.sin = max(0, min(99, int(raw.get("sin", 0) or 0)))
+                return player
+
+            p1 = build_player(0, raw_players[0])
+            p2 = build_player(1, raw_players[1])
+            base = GameEngine.create_new(
+                cards=self.cards, p1_name=p1.name, p2_name=p2.name,
+                p1_expansion=self._deck_religion(DEFAULT_PLAYER_DECK),
+                p2_expansion=self._deck_religion(DEFAULT_AI_DECK),
+                p1_premade_deck_id=DEFAULT_PLAYER_DECK,
+                p2_premade_deck_id=DEFAULT_AI_DECK, seed=self.seed,
+            )
+            flags = base.state.flags
+            flags.pop("runtime_state", None)
+            flags["innate_pending_setup"] = {"0": [], "1": []}
+            flags["innate_active_uids"] = {"0": list(innate_uids[0]), "1": list(innate_uids[1])}
+            if not bool(payload.get("initial_draw", True)):
+                flags["skip_next_draw_phase"] = {"0": active_player == 0, "1": active_player == 1}
+            self.engine = GameEngine(
+                type(base.state)(
+                    players=[p1, p2], instances=instances, active_player=active_player,
+                    turn_number=1, phase="test_setup", preparation_turns_done=2,
+                    coin_toss_winner=active_player, flags=flags,
+                    logs=["Partita di test configurata manualmente."], winner=None,
+                ),
+                seed=self.seed,
+            )
+            self.mode = mode
+            self.rng = random.Random(self.seed)
+            self.ai_steps = 0
+            self.chain_active = False
+            self.chain_priority_idx = active_player
+            self.chain_pass_count = 0
+            self.post_runtime_chain_actor = None
+            self._bind_choices()
+            for owner, uids in innate_uids.items():
+                for uid in uids:
+                    resolve_card_effect(self.engine, owner, uid, None)
+                    self.engine.state.log(
+                        f"{self.engine.state.players[owner].name} inizia il test con Innata "
+                        f"{self.engine.state.instances[uid].definition.name} attiva."
+                    )
+            ok, message = self._execute_operation(self.engine.start_turn)
+            return self.snapshot(ok=ok, message=message or "Partita di test avviata.")
+
     def _deck_religion(self, deck_id: str) -> str:
         for candidate_id, religion, _name in available_premade_decks():
             if candidate_id == deck_id:
@@ -492,6 +663,67 @@ class WebGameSession:
             "card": self._card(uid),
         }
 
+    def _definition_preview(self, card_name: str) -> dict[str, Any] | None:
+        wanted = str(card_name or "").strip().casefold()
+        definition = next((card for card in self.cards if card.name.strip().casefold() == wanted), None)
+        if definition is None:
+            return None
+        return {
+            "uid": None,
+            "name": definition.name,
+            "type": definition.card_type,
+            "cost": definition.faith,
+            "faith": definition.faith,
+            "strength": definition.strength,
+            "crosses": definition.crosses,
+            "effect": definition.effect_text,
+            "expansion": definition.expansion,
+        }
+
+    def _pending_slot_summon_name(self, source_uid: str) -> str:
+        """Describe a slot picker without changing how the effect is resolved."""
+        if self.engine is None:
+            return ""
+        source = self.engine.state.instances.get(source_uid)
+        script = runtime_cards.get_script(source.definition.name) if source is not None else None
+        if script is None:
+            return ""
+
+        flags = self.engine.state.flags
+        mode = str(flags.get("_runtime_pending_mode", "")).strip().lower()
+        try:
+            action_index = int(str(flags.get("_runtime_action_index_resume", "0")) or "0")
+        except ValueError:
+            action_index = 0
+        action_groups = {
+            "play": list(script.on_play_actions or []),
+            "enter": list(script.on_enter_actions or []),
+            "activate": list(script.on_activate_actions or []),
+        }
+        names: list[str] = []
+        current_actions = action_groups.get(mode, [])
+        for action in current_actions[action_index + 1:]:
+            effect = action.effect
+            if str(effect.action or "").strip().lower() == "summon_generated_token" and str(effect.position or "").strip().lower() == "selected_target_slot":
+                if str(effect.card_name or "").strip():
+                    names.append(str(effect.card_name).strip())
+                break
+
+        if not names:
+            for actions in action_groups.values():
+                for action in actions:
+                    effect = action.effect
+                    if str(effect.action or "").strip().lower() == "summon_generated_token" and str(effect.position or "").strip().lower() == "selected_target_slot":
+                        if str(effect.card_name or "").strip():
+                            names.append(str(effect.card_name).strip())
+            for triggered in script.triggered_effects or []:
+                effect = triggered.effect
+                if str(effect.action or "").strip().lower() == "summon_generated_token" and str(effect.position or "").strip().lower() == "selected_target_slot":
+                    if str(effect.card_name or "").strip():
+                        names.append(str(effect.card_name).strip())
+        unique_names = list(dict.fromkeys(names))
+        return unique_names[0] if len(unique_names) == 1 else ""
+
     def _runtime_card_value(self, uid: str) -> int:
         if self.engine is None:
             return 0
@@ -569,7 +801,21 @@ class WebGameSession:
             labels = {}
         minimum = int(str(flags.get("_runtime_choice_min_targets", "0")) or "0")
         maximum = int(str(flags.get("_runtime_choice_max_targets", "1")) or "1")
-        if candidates:
+        source = str(flags.get("_runtime_choice_source", reveal_uid))
+        slot_candidates = bool(candidates) and all(
+            len(value) >= 2 and value[:1].lower() in {"a", "d", "r"} and value[1:].isdigit()
+            for value in candidates
+        )
+        summon_name = self._pending_slot_summon_name(source) if slot_candidates else ""
+        summon_card = self._definition_preview(summon_name) if summon_name else None
+        if candidates and summon_card:
+            title = f"Evoca {summon_name}"
+            prompt = f"Scegli lo slot del terreno in cui evocare {summon_name}."
+            options = [
+                {"value": token, "label": self._slot_label(token), "card": summon_card, "slot": token}
+                for token in candidates
+            ]
+        elif candidates:
             options = [self._candidate_option(uid, owner_idx) for uid in candidates]
         elif values:
             options = [{"value": value, "label": str(labels.get(value, value))} for value in values]
@@ -579,12 +825,14 @@ class WebGameSession:
             prompt = prompt or f"Hai rivelato {name}. Continua la risoluzione dell'effetto."
             options = [{"value": "__continue__", "label": "Continua"}]
             minimum = maximum = 1
-        source = str(flags.get("_runtime_choice_source", reveal_uid))
         return {
             "id": f"runtime:{source}:{reveal_uid}", "source": "runtime", "player_index": owner_idx,
-            "kind": "multi" if maximum != 1 else "single", "title": title, "prompt": prompt,
+            "kind": ("summon_slot" if summon_card else ("reveal" if not candidates and not values else ("multi" if maximum != 1 else "single"))),
+            "title": title, "prompt": prompt,
             "options": options, "minimum": minimum, "maximum": maximum, "allow_cancel": minimum == 0,
-            "card_uid": reveal_uid, "preserve_order": bool(flags.get("_runtime_choice_preserve_order")),
+            "card_uid": reveal_uid,
+            "revealed_card": (self._card(reveal_uid) if not candidates and not values else None),
+            "preserve_order": bool(flags.get("_runtime_choice_preserve_order")),
         }
 
     def _settle_ai_runtime_choices(self) -> None:
@@ -617,6 +865,28 @@ class WebGameSession:
             actor_idx = self.post_runtime_chain_actor
             self.post_runtime_chain_actor = None
             self._start_chain(actor_idx)
+        self._continue_deferred_turn_start()
+
+    def _finish_turn_transition(self) -> None:
+        """Start the next turn only after mandatory end-turn choices resolve."""
+        assert self.engine is not None
+        if self._runtime_decision() is not None:
+            self.engine.state.flags["_web_start_turn_after_runtime_choice"] = True
+            return
+        if self.mode == "ai":
+            self._start_next_turn()
+        elif self.engine.state.winner is None:
+            self.engine.start_turn()
+
+    def _continue_deferred_turn_start(self) -> None:
+        if self.engine is None or self._runtime_decision() is not None:
+            return
+        if not bool(self.engine.state.flags.pop("_web_start_turn_after_runtime_choice", False)):
+            return
+        if self.mode == "ai":
+            self._start_next_turn()
+        elif self.engine.state.winner is None:
+            self.engine.start_turn()
 
     def resolve_runtime_decision(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -644,6 +914,7 @@ class WebGameSession:
                     actor_idx = self.post_runtime_chain_actor
                     self.post_runtime_chain_actor = None
                     self._start_chain(actor_idx)
+                self._continue_deferred_turn_start()
             return self._run_and_snapshot(resume)
 
     def _manual_play_steps(self, uid: str, player_idx: int | None) -> list[dict[str, Any]]:
@@ -1136,9 +1407,7 @@ class WebGameSession:
                     self.engine.end_turn()
                     if self.mode == "ai":
                         self.ai_steps = 0
-                        self._start_next_turn()
-                    elif self.engine.state.winner is None:
-                        self.engine.start_turn()
+                    self._finish_turn_transition()
                     return "Turno completato."
 
                 return self._run_and_snapshot(finish_turn)
@@ -1193,7 +1462,7 @@ class WebGameSession:
                 if should_end and self.engine.state.winner is None and not self.chain_active:
                     self.engine.end_turn()
                     self.ai_steps = 0
-                    self._start_next_turn()
+                    self._finish_turn_transition()
                 return result
 
             return self._run_and_snapshot(perform_step)
@@ -1234,6 +1503,10 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
             with self.session.lock:
                 self._send_json(self.session.deck_editor())
             return
+        if path == "/api/test-editor":
+            with self.session.lock:
+                self._send_json(self.session.test_editor())
+            return
         super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
@@ -1245,6 +1518,9 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
             path = urlparse(self.path).path
             if path == "/api/new-game":
                 self._send_json(self.session.new_game(payload))
+                return
+            if path == "/api/test-game":
+                self._send_json(self.session.start_test_game(payload))
                 return
             if path == "/api/play-options":
                 self._send_json(self.session.play_options(payload))
@@ -1298,7 +1574,7 @@ def main() -> None:
     if args.premades_json:
         for warning in register_premades_from_json(args.premades_json):
             print(f"Avviso deck: {warning}")
-    static_dir = Path(__file__).resolve().parent.parent / "web_concept"
+    static_dir = bundled_project_root() / "web_concept"
     session = WebGameSession(Path(args.cards_json), seed=args.seed)
 
     def handler(*handler_args: Any, **handler_kwargs: Any) -> HolyWarRequestHandler:

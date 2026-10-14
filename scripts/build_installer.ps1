@@ -31,11 +31,13 @@ if (-not $SkipPyInstaller) {
         --collect-submodules holywar.effects.card_scripts.cards `
         --add-data "holywar\data\cards.json;holywar\data" `
         --add-data "holywar\data\premade_decks.json;holywar\data" `
-        holywar\gui.py
+        --add-data "web_concept;web_concept" `
+        holywar\web.py
 }
 
 $InnoCandidates = @(
     @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
         (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
         (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
     ) | Where-Object { $_ -and (Test-Path $_) }

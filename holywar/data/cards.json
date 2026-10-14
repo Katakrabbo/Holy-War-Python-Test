@@ -2497,7 +2497,7 @@
     "crosses": "9",
     "faith": 7,
     "strength": 7,
-    "effect_text": "Ogni volta che un Token o un Santo viene mandato dal campo al cimitero, questo santo riceve +1 Fede e +1 Forza.",
+    "effect_text": "Ogni volta che un Santo viene mandato dal campo al cimitero, questo santo riceve +1 Fede e +1 Forza.",
     "expansion": "MAY-1",
     "is_token": false,
     "aliases": []

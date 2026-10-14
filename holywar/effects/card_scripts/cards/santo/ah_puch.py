@@ -13,7 +13,7 @@ SCRIPT = {
                 "frequency": "each_turn",
                 "condition": {
                     "payload_from_zone_in": ["attack", "defense"],
-                    "event_card_type_in": ["santo", "token"],
+                    "event_card_type_in": ["santo"],
                 },
             },
             "target": {
@@ -33,7 +33,7 @@ SCRIPT = {
                 "frequency": "each_turn",
                 "condition": {
                     "payload_from_zone_in": ["attack", "defense"],
-                    "event_card_type_in": ["santo", "token"],
+                    "event_card_type_in": ["santo"],
                 },
             },
             "target": {

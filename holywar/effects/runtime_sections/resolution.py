@@ -606,7 +606,13 @@ class RuntimeResolutionMixin:
                 trigger_choice_title = str(flags.get("_runtime_trigger_choice_title", "")).strip() or None
                 trigger_choice_prompt = str(flags.get("_runtime_trigger_choice_prompt", "")).strip() or None
                 trigger_choice_options_raw = str(flags.get("_runtime_trigger_choice_options", "")).strip()
+                trigger_min_targets_raw = str(flags.get("_runtime_trigger_min_targets", "")).strip()
+                trigger_max_targets_raw = str(flags.get("_runtime_trigger_max_targets", "")).strip()
+                trigger_event_player_raw = str(flags.get("_runtime_trigger_event_player", "")).strip()
                 trigger_amount = int(trigger_amount_raw) if trigger_amount_raw else 0
+                trigger_min_targets = int(trigger_min_targets_raw) if trigger_min_targets_raw else None
+                trigger_max_targets = int(trigger_max_targets_raw) if trigger_max_targets_raw else None
+                trigger_event_player = int(trigger_event_player_raw) if trigger_event_player_raw else owner_idx
                 trigger_shuffle_after = trigger_shuffle_after_raw in {"1", "true", "yes", "y"}
                 trigger_choice_options: list[dict[str, Any]] = []
                 if trigger_choice_options_raw:
@@ -634,24 +640,27 @@ class RuntimeResolutionMixin:
                             choice_title=trigger_choice_title,
                             choice_prompt=trigger_choice_prompt,
                             choice_options=trigger_choice_options,
+                            min_targets=trigger_min_targets,
+                            max_targets=trigger_max_targets,
                         ),
                     )
-                    # Generic trigger-side choose_option follow-up:
-                    # after choice resolution, execute sibling triggered effects
-                    # on the same source/event whose conditions now match.
-                    if _norm(action_name) == "choose_option":
+                    # After a trigger-side choice, execute sibling effects only
+                    # once the controller has supplied the required decision.
+                    if _norm(action_name) in {"choose_option", "choose_targets"}:
                         selected_option = str(flags.get("_runtime_selected_option", "")).strip()
-                        if selected_option and trigger_event_name:
+                        selected_target = str(flags.get("_runtime_selected_target", "")).strip()
+                        choice_completed = selected_option if _norm(action_name) == "choose_option" else selected_target
+                        if choice_completed and trigger_event_name:
                             follow_ctx = RuleEventContext(
                                 engine=engine,
                                 event=trigger_event_name,
-                                player_idx=owner_idx,
+                                player_idx=trigger_event_player,
                                 payload={"card": source_uid},
                             )
                             for follow_te in script.triggered_effects:
                                 if _norm(follow_te.trigger.event) != _norm(trigger_event_name):
                                     continue
-                                if _norm(follow_te.effect.action) == "choose_option":
+                                if _norm(follow_te.effect.action) == _norm(action_name):
                                     continue
                                 if not self._event_matches(follow_ctx, owner_idx, follow_te.trigger.condition):
                                     continue
@@ -689,6 +698,12 @@ class RuntimeResolutionMixin:
                 flags.pop("_runtime_trigger_choice_title", None)
                 flags.pop("_runtime_trigger_choice_prompt", None)
                 flags.pop("_runtime_trigger_choice_options", None)
+                flags.pop("_runtime_trigger_choice_source", None)
+                flags.pop("_runtime_trigger_event_player", None)
+                flags.pop("_runtime_trigger_min_targets", None)
+                flags.pop("_runtime_trigger_max_targets", None)
+                if mode == "trigger_action":
+                    flags.pop("_runtime_selected_target", None)
                 flags.pop("_runtime_copied_play_card", None)
                 flags.pop("_runtime_force_manual_selected_target", None)
 
@@ -792,6 +807,17 @@ class RuntimeResolutionMixin:
                     return
                 if not self._event_matches(ctx, _owner, _te.trigger.condition):
                     return
+                pending_source = str(ctx.engine.state.flags.get("_runtime_trigger_choice_source", "")).strip()
+                pending_event = str(ctx.engine.state.flags.get("_runtime_trigger_event_name", "")).strip()
+                if (
+                    bool(ctx.engine.state.flags.get("_runtime_waiting_for_reveal"))
+                    and pending_source == _source
+                    and _norm(pending_event) == _norm(_event_name)
+                    and _norm(_te.effect.action) != "choose_targets"
+                ):
+                    # Resolve the controller's mandatory choice before applying
+                    # sibling effects from this same trigger event.
+                    return
                 source_inst = ctx.engine.state.instances.get(_source)
                 source_name = source_inst.definition.name if source_inst is not None else _source
                 ctx.engine.state.log(f"{source_name} attiva il suo effetto.")
@@ -811,6 +837,21 @@ class RuntimeResolutionMixin:
                         self._apply_effect(ctx.engine, _owner, _source, [], _te.effect)
                     else:
                         self._apply_effect(ctx.engine, _owner, _source, targets, _te.effect)
+
+                    if effect_action == "choose_targets" and ctx.engine.state.flags.get("_runtime_waiting_for_reveal"):
+                        ctx.engine.state.flags["_runtime_resume_source"] = _source
+                        ctx.engine.state.flags["_runtime_resume_owner"] = str(_owner)
+                        ctx.engine.state.flags["_runtime_pending_mode"] = "trigger_action"
+                        ctx.engine.state.flags["_runtime_trigger_action"] = "choose_targets"
+                        ctx.engine.state.flags["_runtime_trigger_choice_source"] = _source
+                        ctx.engine.state.flags["_runtime_trigger_event_name"] = _event_name
+                        ctx.engine.state.flags["_runtime_trigger_event_player"] = str(ctx.player_idx)
+                        ctx.engine.state.flags["_runtime_trigger_min_targets"] = str(
+                            _te.effect.min_targets if _te.effect.min_targets is not None else 0
+                        )
+                        ctx.engine.state.flags["_runtime_trigger_max_targets"] = str(
+                            _te.effect.max_targets if _te.effect.max_targets is not None else 1
+                        )
 
                     # Trigger-side choose_option needs an explicit follow-up pass:
                     # once the choice is confirmed, apply sibling triggers on the

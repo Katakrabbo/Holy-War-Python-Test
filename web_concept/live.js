@@ -12,7 +12,12 @@ const ui = {
   deckEditor: null,
   deckDraft: null,
   deckEditorReturn: null,
-  deckValidationTimer: null
+  deckValidationTimer: null,
+  testEditor: null,
+  testDraft: null,
+  testStep: 0,
+  testPicker: null,
+  testStarted: false
 };
 
 const $ = selector => document.querySelector(selector);
@@ -22,10 +27,10 @@ async function api(path, payload) {
   const options = payload === undefined
     ? { headers: { Accept: "application/json" } }
     : {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify(payload)
-      };
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload)
+    };
   const response = await fetch(path, options);
   const data = await response.json();
   if (!response.ok) throw new Error(data.message || `Errore HTTP ${response.status}`);
@@ -189,10 +194,14 @@ function updateZoneButtons(player, owner) {
 
 function renderEnemyHand(enemy) {
   const hand = $(".enemy-hand");
-  const cards = Array.from({ length: enemy.hand_count }, () => {
+  const count = enemy.hand_count;
+  const cards = Array.from({ length: count }, (_, index) => {
     const back = document.createElement("article");
     back.className = "card card-back";
     back.setAttribute("aria-label", "Carta avversaria coperta");
+    const position = count <= 1 ? 0 : (index / (count - 1)) * 2 - 1;
+    back.style.setProperty("--fan-angle", `${position * 11}deg`);
+    back.style.setProperty("--fan-y", `${Math.abs(position) * 6}px`);
     return back;
   });
   const caption = document.createElement("span");
@@ -339,26 +348,41 @@ function renderRuntimeDecision(decision) {
   $("#runtime-decision-prompt").textContent = decision.prompt || "Completa la scelta per continuare.";
   resetEffectChoicePreview("#runtime-choice-preview");
   const options = $("#runtime-decision-options");
-  options.replaceChildren(...decision.options.map((option, index) => {
-    const label = document.createElement("label");
-    label.className = "effect-choice";
-    const input = document.createElement("input");
-    input.type = decision.maximum === 1 ? "radio" : "checkbox";
-    input.name = "runtime-decision-option";
-    input.dataset.value = JSON.stringify(option.value);
-    input.addEventListener("change", () => {
-      const value = JSON.parse(input.dataset.value);
-      ui.runtimeSelectionOrder = ui.runtimeSelectionOrder.filter(item => item !== value);
-      if (input.checked) ui.runtimeSelectionOrder.push(value);
-    });
-    if (option.card) {
-      label.addEventListener("mouseenter", () => showEffectChoicePreview(option.card, "#runtime-choice-preview"));
-      input.addEventListener("focus", () => showEffectChoicePreview(option.card, "#runtime-choice-preview"));
-    }
-    if (index === 0 && decision.kind === "confirm") input.checked = true;
-    label.append(input, makeEffectChoiceContent(option, "#runtime-choice-preview"));
-    return label;
-  }));
+  options.classList.toggle("reveal-choice-list", decision.kind === "reveal");
+  $("#confirm-runtime-decision").textContent = decision.kind === "reveal" ? "Continua" : (decision.kind === "summon_slot" ? "Evoca qui" : "Conferma");
+  if (decision.kind === "reveal" && decision.revealed_card) {
+    const card = decision.revealed_card;
+    const revealed = document.createElement("article");
+    revealed.className = "revealed-effect-card";
+    revealed.tabIndex = 0;
+    revealed.innerHTML = `<small>${card.type.toUpperCase()} · ${card.expansion || ""}</small><strong>${card.name}</strong><span class="effect-choice-stats"><span title="Ispirazione"><i class="inspiration-symbol" aria-hidden="true"></i> ${card.cost ?? "–"}</span><span title="Attacco">✦ ${card.strength ?? "–"}</span><span title="Fede">◈ ${card.faith ?? "–"}</span></span>`;
+    const preview = () => showEffectChoicePreview(card, "#runtime-choice-preview");
+    revealed.addEventListener("mouseenter", preview);
+    revealed.addEventListener("focus", preview);
+    options.replaceChildren(revealed);
+    showEffectChoicePreview(card, "#runtime-choice-preview");
+  } else {
+    options.replaceChildren(...decision.options.map((option, index) => {
+      const label = document.createElement("label");
+      label.className = "effect-choice";
+      const input = document.createElement("input");
+      input.type = decision.maximum === 1 ? "radio" : "checkbox";
+      input.name = "runtime-decision-option";
+      input.dataset.value = JSON.stringify(option.value);
+      input.addEventListener("change", () => {
+        const value = JSON.parse(input.dataset.value);
+        ui.runtimeSelectionOrder = ui.runtimeSelectionOrder.filter(item => item !== value);
+        if (input.checked) ui.runtimeSelectionOrder.push(value);
+      });
+      if (option.card) {
+        label.addEventListener("mouseenter", () => showEffectChoicePreview(option.card, "#runtime-choice-preview"));
+        input.addEventListener("focus", () => showEffectChoicePreview(option.card, "#runtime-choice-preview"));
+      }
+      if (index === 0 && decision.kind === "confirm") input.checked = true;
+      label.append(input, makeEffectChoiceContent(option, "#runtime-choice-preview"));
+      return label;
+    }));
+  }
   const firstCard = decision.options.find(option => option.card)?.card;
   if (firstCard) showEffectChoicePreview(firstCard, "#runtime-choice-preview");
   $("#cancel-runtime-decision").hidden = !decision.allow_cancel;
@@ -383,6 +407,10 @@ $("#runtime-decision-form").addEventListener("submit", event => {
   event.preventDefault();
   const decision = ui.state?.decision;
   if (!decision) return;
+  if (decision.kind === "reveal") {
+    submitRuntimeDecision("__continue__");
+    return;
+  }
   const checked = $$('#runtime-decision-options input:checked');
   if (checked.length < decision.minimum || checked.length > decision.maximum) {
     setMessage(`Seleziona da ${decision.minimum} a ${decision.maximum} opzioni.`, true);
@@ -883,6 +911,16 @@ function showDeckCardInfo(card) {
   info.append(label, name, effect);
 }
 
+function catalogueCardStats(card, quantity = null) {
+  const type = card.card_type || card.type || "Carta";
+  const faith = card.faith ?? "–";
+  const attack = card.strength ?? "–";
+  const inspiration = card.faith ?? card.cost ?? "–";
+  const crosses = card.crosses || "–";
+  const copies = quantity == null ? `max ${card.max_copies}` : `${quantity} ${quantity === 1 ? "copia" : "copie"} · max ${card.max_copies}`;
+  return `<span>${type}</span><span title="Fede">◈ ${faith}</span><span title="Attacco">✦ ${attack}</span><span title="Ispirazione"><i class="inspiration-symbol" aria-hidden="true"></i> ${inspiration}</span><span title="Croci">✟ ${crosses}</span><span>${copies}</span>`;
+}
+
 function adjustDeckCard(card, delta) {
   if (!ui.deckDraft) return;
   const current = ui.deckDraft.cards.get(card.name) || 0;
@@ -902,7 +940,8 @@ function makeDeckCardRow(card, currentOnly = false) {
   const title = document.createElement("strong");
   title.textContent = card.name;
   const meta = document.createElement("small");
-  meta.textContent = `${card.card_type} · ${card.crosses || "–"} Croci · max ${card.max_copies}`;
+  meta.className = "catalogue-card-stats";
+  meta.innerHTML = catalogueCardStats(card);
   main.append(title, meta);
   main.addEventListener("mouseenter", () => showDeckCardInfo(card));
   main.addEventListener("focus", () => showDeckCardInfo(card));
@@ -1055,6 +1094,264 @@ $("#deck-editor-dialog").addEventListener("close", () => {
   const returnDialog = ui.deckEditorReturn;
   ui.deckEditorReturn = null;
   if (returnDialog && !$("dialog[open]")) returnDialog.showModal();
+});
+
+const testZoneDefinitions = [
+  { key: "deck", label: "Reliquiario", collection: true, gridClass: "resource-zone" },
+  { key: "hand", label: "Mano", collection: true, gridClass: "resource-zone" },
+  { key: "graveyard", label: "Cimitero", collection: true, gridClass: "resource-zone" },
+  { key: "excommunicated", label: "Scomunicate", collection: true, gridClass: "resource-zone" },
+  { key: "attack", label: "Santi in attacco", slots: 3, types: ["santo", "token"], gridClass: "saint-zone" },
+  { key: "defense", label: "Santi in difesa", slots: 3, types: ["santo", "token"], gridClass: "saint-zone" },
+  { key: "artifacts", label: "Artefatti", slots: 4, types: ["artefatto"], gridClass: "artifact-zone" },
+  { key: "building", label: "Edificio", slots: 1, types: ["edificio"], gridClass: "single-zone" },
+  { key: "innate", label: "Carta Innata", slots: 1, types: ["innata"], gridClass: "single-zone" }
+];
+
+function emptyTestPlayer(name) {
+  return {
+    name, deck: [], hand: [], graveyard: [], excommunicated: [],
+    attack: [null, null, null], defense: [null, null, null],
+    artifacts: [null, null, null, null], building: [null], innate: [null], sin: 0
+  };
+}
+
+function resetTestDraft() {
+  ui.testDraft = { players: [emptyTestPlayer("Pellegrino"), emptyTestPlayer("Custode")] };
+  ui.testStep = 0;
+}
+
+function testCurrentPlayerIndex() { return ui.testStep === 0 ? 1 : 0; }
+
+function testCardByName(name) {
+  return ui.testEditor?.cards.find(card => card.name === name) || null;
+}
+
+function testPlayerCounts(player) {
+  const counts = new Map();
+  [player.deck, player.hand, player.graveyard, player.excommunicated, player.attack, player.defense, player.artifacts, player.building, player.innate]
+    .flat().filter(Boolean).forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
+  return counts;
+}
+
+function testZoneDescription(player, zone, slot = null) {
+  const values = player[zone];
+  if (slot != null) return values[slot] || "Slot vuoto";
+  if (!values.length) return "Zona vuota";
+  const counts = new Map();
+  values.forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
+  return [...counts].map(([name, qty]) => `${qty}× ${name}`).join(", ");
+}
+
+function renderTestBoard() {
+  const playerIndex = testCurrentPlayerIndex();
+  const player = ui.testDraft.players[playerIndex];
+  $("#test-game-title").textContent = playerIndex === 1 ? "Configura l'avversario" : "Configura il giocatore";
+  const board = $("#test-zone-board");
+  board.replaceChildren(...testZoneDefinitions.map(definition => {
+    const group = document.createElement("section");
+    group.className = `test-zone-group ${definition.gridClass || ""}`;
+    const heading = document.createElement("h3");
+    heading.textContent = definition.label;
+    const slots = document.createElement("div");
+    slots.className = "test-zone-slots";
+    const count = definition.collection ? 1 : definition.slots;
+    for (let slot = 0; slot < count; slot += 1) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "test-zone-button";
+      const description = testZoneDescription(player, definition.key, definition.collection ? null : slot);
+      const filled = definition.collection ? player[definition.key].length > 0 : Boolean(player[definition.key][slot]);
+      button.classList.toggle("filled", filled);
+      const title = document.createElement("strong");
+      title.textContent = definition.collection ? `${player[definition.key].length} carte` : `${definition.label} ${slot + 1}`;
+      const detail = document.createElement("small");
+      detail.textContent = description;
+      button.append(title, detail);
+      const open = event => { event.preventDefault(); openTestPicker(playerIndex, definition, definition.collection ? null : slot); };
+      button.addEventListener("click", open);
+      button.addEventListener("contextmenu", open);
+      slots.append(button);
+    }
+    group.append(heading, slots);
+    return group;
+  }));
+}
+
+function renderTestWizard() {
+  $$('[data-test-step]').forEach(node => node.classList.toggle("active", Number(node.dataset.testStep) === ui.testStep));
+  $("#test-zone-step").hidden = ui.testStep === 2;
+  $("#test-start-step").hidden = ui.testStep !== 2;
+  $("#test-back-button").disabled = ui.testStep === 0;
+  $("#test-next-button").hidden = ui.testStep === 2;
+  $("#test-start-button").hidden = ui.testStep !== 2;
+  if (ui.testStep < 2) renderTestBoard();
+  else {
+    $("#test-game-title").textContent = "Scegli il primo turno";
+    const summaries = ui.testDraft.players.map((player, index) => {
+      const field = [...player.attack, ...player.defense, ...player.artifacts, ...player.building].filter(Boolean).length;
+      const innate = player.innate.filter(Boolean).length;
+      return `${index === 0 ? "Giocatore" : "Avversario"}: ${player.deck.length} deck, ${player.hand.length} mano, ${player.graveyard.length} cimitero, ${player.excommunicated.length} scomunicate, ${field} terreno, ${innate} Innata.`;
+    });
+    $("#test-scenario-summary").textContent = summaries.join(" ");
+  }
+}
+
+function showTestPickerPreview(card) {
+  const preview = $("#test-picker-preview");
+  preview.replaceChildren();
+  const type = document.createElement("small");
+  type.textContent = `${card.card_type} · ${card.expansion || "Neutre"} · ${card.crosses || "–"} Croci`;
+  const name = document.createElement("strong");
+  name.textContent = card.name;
+  const effect = document.createElement("p");
+  effect.textContent = `${card.strength != null ? `ATK ${card.strength} · Fede ${card.faith ?? "–"} · ` : ""}${card.effect_text || "Nessun testo effetto."}`;
+  preview.append(type, name, effect);
+}
+
+function testPickerCards() {
+  const definition = ui.testPicker.definition;
+  const search = $("#test-card-search").value.trim().toLocaleLowerCase("it");
+  const type = $("#test-card-type").value;
+  const expansion = $("#test-card-expansion").value;
+  return ui.testEditor.cards.filter(card => {
+    const cardType = card.card_type.toLocaleLowerCase("it");
+    return (!definition.types || definition.types.includes(cardType)) &&
+      (!type || card.card_type === type) && (!expansion || card.expansion === expansion) &&
+      (!search || card.name.toLocaleLowerCase("it").includes(search) || (card.effect_text || "").toLocaleLowerCase("it").includes(search));
+  });
+}
+
+function adjustTestZone(card, delta) {
+  const { playerIndex, definition, slot } = ui.testPicker;
+  const player = ui.testDraft.players[playerIndex];
+  if (definition.collection) {
+    if (delta > 0) {
+      const used = testPlayerCounts(player).get(card.name) || 0;
+      if (used >= card.max_copies) { setMessage(`${card.name}: massimo ${card.max_copies} copie.`, true); return; }
+      player[definition.key].push(card.name);
+    } else {
+      const index = player[definition.key].lastIndexOf(card.name);
+      if (index >= 0) player[definition.key].splice(index, 1);
+    }
+  } else if (delta > 0) {
+    const old = player[definition.key][slot];
+    const used = (testPlayerCounts(player).get(card.name) || 0) - (old === card.name ? 1 : 0);
+    if (used >= card.max_copies) { setMessage(`${card.name}: massimo ${card.max_copies} copie.`, true); return; }
+    player[definition.key][slot] = card.name;
+  } else {
+    player[definition.key][slot] = null;
+  }
+  renderTestPicker();
+}
+
+function testCardRow(card) {
+  const row = document.createElement("div");
+  row.className = "deck-card-row test-card-add-row";
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  row.setAttribute("aria-label", `Aggiungi ${card.name} alla zona`);
+  const main = document.createElement("div");
+  main.className = "deck-card-row-main";
+  const title = document.createElement("strong"); title.textContent = card.name;
+  const meta = document.createElement("small"); meta.className = "catalogue-card-stats"; meta.innerHTML = catalogueCardStats(card);
+  main.append(title, meta);
+  main.addEventListener("mouseenter", () => showTestPickerPreview(card));
+  row.addEventListener("focus", () => showTestPickerPreview(card));
+  row.addEventListener("click", () => adjustTestZone(card, 1));
+  row.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    adjustTestZone(card, 1);
+  });
+  row.append(main);
+  return row;
+}
+
+function renderTestPickerSelection() {
+  const { playerIndex, definition, slot } = ui.testPicker;
+  const player = ui.testDraft.players[playerIndex];
+  const names = definition.collection ? player[definition.key] : [player[definition.key][slot]].filter(Boolean);
+  const counts = new Map(); names.forEach(name => counts.set(name, (counts.get(name) || 0) + 1));
+  const list = $("#test-zone-selection");
+  list.replaceChildren(...[...counts].map(([name, qty]) => {
+    const card = testCardByName(name);
+    const row = document.createElement("div"); row.className = "deck-card-row";
+    const main = document.createElement("div"); main.className = "deck-card-row-main";
+    const title = document.createElement("strong"); title.textContent = name;
+    const meta = document.createElement("small"); meta.className = "catalogue-card-stats";
+    meta.innerHTML = card ? catalogueCardStats(card, qty) : `${qty} ${qty === 1 ? "copia" : "copie"}`;
+    main.append(title, meta);
+    main.addEventListener("mouseenter", () => card && showTestPickerPreview(card));
+    const actions = document.createElement("div"); actions.className = "deck-row-actions";
+    const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "−"; remove.addEventListener("click", () => adjustTestZone(card, -1));
+    actions.append(remove); row.append(main, actions); return row;
+  }));
+  if (!names.length) { const empty = document.createElement("div"); empty.className = "deck-empty"; empty.textContent = "Zona vuota."; list.append(empty); }
+}
+
+function renderTestPicker() {
+  const results = $("#test-card-results");
+  const cards = testPickerCards();
+  results.replaceChildren(...cards.map(testCardRow));
+  if (!cards.length) { const empty = document.createElement("div"); empty.className = "deck-empty"; empty.textContent = "Nessuna carta disponibile con questi filtri."; results.append(empty); }
+  renderTestPickerSelection();
+}
+
+function openTestPicker(playerIndex, definition, slot) {
+  ui.testPicker = { playerIndex, definition, slot };
+  $("#test-picker-side").textContent = playerIndex === 1 ? "AVVERSARIO" : "GIOCATORE";
+  $("#test-picker-title").textContent = slot == null ? definition.label : `${definition.label} ${slot + 1}`;
+  $("#test-card-search").value = "";
+  $("#test-card-type").value = "";
+  $("#test-card-expansion").value = "";
+  renderTestPicker();
+  $("#test-card-picker-dialog").showModal();
+}
+
+async function openTestGame() {
+  $("#setup-dialog").close();
+  ui.testStarted = false;
+  try {
+    ui.testEditor = await api("/api/test-editor");
+    resetTestDraft();
+    const types = [...new Set(ui.testEditor.cards.map(card => card.card_type))].sort((a, b) => a.localeCompare(b, "it"));
+    const expansions = [...new Set(ui.testEditor.cards.map(card => card.expansion).filter(Boolean))].sort((a, b) => a.localeCompare(b, "it"));
+    $("#test-card-type").replaceChildren(new Option("Tutti i tipi", ""), ...types.map(value => new Option(value, value)));
+    $("#test-card-expansion").replaceChildren(new Option("Tutte le espansioni", ""), ...expansions.map(value => new Option(value, value)));
+    renderTestWizard();
+    $("#test-game-dialog").showModal();
+  } catch (error) { setMessage(error.message, true); $("#setup-dialog").showModal(); }
+}
+
+$("#setup-test-game-button").addEventListener("click", openTestGame);
+$("#test-card-search").addEventListener("input", renderTestPicker);
+$("#test-card-type").addEventListener("change", renderTestPicker);
+$("#test-card-expansion").addEventListener("change", renderTestPicker);
+$("#test-picker-close").addEventListener("click", () => $("#test-card-picker-dialog").close());
+$("#test-picker-continue").addEventListener("click", () => { $("#test-card-picker-dialog").close(); renderTestBoard(); });
+$("#test-next-button").addEventListener("click", () => { ui.testStep = Math.min(2, ui.testStep + 1); renderTestWizard(); });
+$("#test-back-button").addEventListener("click", () => { ui.testStep = Math.max(0, ui.testStep - 1); renderTestWizard(); });
+$("#test-start-button").addEventListener("click", async () => {
+  const button = $("#test-start-button"); button.disabled = true;
+  try {
+    const active = Number($('input[name="test-active-player"]:checked').value);
+    const data = await api("/api/test-game", {
+      mode: $("#test-game-mode").value,
+      active_player: active,
+      initial_draw: $("#test-initial-draw").checked,
+      players: ui.testDraft.players
+    });
+    ui.selectedUid = null;
+    render(data);
+    ui.testStarted = true;
+    $("#test-game-dialog").close();
+    setMessage(data.message);
+  } catch (error) { setMessage(error.message, true); }
+  finally { button.disabled = false; }
+});
+$("#test-game-dialog").addEventListener("close", () => {
+  if (!ui.testStarted && !$("dialog[open]")) $("#setup-dialog").showModal();
 });
 
 function updateSetupMode() {

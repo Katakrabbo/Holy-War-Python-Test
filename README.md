@@ -16,6 +16,8 @@ pip install -e .[dev]
 .\.venv\Scripts\python.exe -m holywar.gui --cards-json "holywar/data/cards.json"
 ```
 
+Su Windows puoi anche fare doppio clic su `Avvia Holy War.bat`: al primo avvio crea automaticamente `.venv`, installa le dipendenze mancanti e apre l'interfaccia web.
+
 ### Nuova interfaccia web locale
 
 ```powershell
@@ -89,14 +91,15 @@ Comando rapido (se hai gia `dist\HolyWar` e vuoi solo rigenerare il setup):
 ```
 
 Cosa fa lo script:
-- compila l'app GUI con PyInstaller in `dist\HolyWar\`
+- compila l'app web locale con PyInstaller in `dist\HolyWar\`
+- include catalogo, script degli effetti, interfaccia web e deck precreati
 - compila l'installer Inno Setup usando `installer\HolyWar.iss`
 
 Output finale:
 - `installer\dist\HolyWar-Setup-<version>.exe`
 
 L'installer crea:
-- installazione in `Program Files\Holy War`
+- installazione per utente in `%LOCALAPPDATA%\Programs\Holy War` (non richiede privilegi amministrativi)
 - shortcut menu Start
 - shortcut desktop (opzionale)
 - disinstallazione standard Windows

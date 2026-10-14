@@ -376,6 +376,11 @@ def _summon_turn_start_tokens(engine: "GameEngine", current: int) -> None:
 
 # Resolves the active player's draw phase, including special draw modifiers.
 def _run_draw_phase(engine: "GameEngine", current: int) -> int:
+    skip_next = engine.state.flags.setdefault("skip_next_draw_phase", {"0": False, "1": False})
+    if bool(skip_next.get(str(current), False)):
+        skip_next[str(current)] = False
+        engine.state.log(f"{engine.state.players[current].name} salta la pescata iniziale del test.")
+        return 0
     next_draw_override = engine.state.flags.setdefault("next_turn_draw_override", {"0": 0, "1": 0})
     override_amount = int(next_draw_override.get(str(engine.state.active_player), 0) or 0)
     if override_amount > 0:
