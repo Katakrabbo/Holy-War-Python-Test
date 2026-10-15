@@ -1,0 +1,9 @@
+{
+  "name": "holy-war-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Comandi di sviluppo per Holy War",
+  "scripts": {
+    "dev": "scripts\\dev.cmd"
+  }
+}

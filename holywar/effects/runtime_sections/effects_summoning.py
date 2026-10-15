@@ -157,11 +157,25 @@ class RuntimeEffectsSummoningMixin:
             slot = None
             zone = ""
             if chosen_type in {"santo", "token"}:
-                slot = engine._first_open(board_player.attack)
-                zone = "attack"
+                attack_slots = [f"a{i + 1}" for i, uid in enumerate(board_player.attack) if uid is None]
+                defense_slots = [f"d{i + 1}" for i, uid in enumerate(board_player.defense) if uid is None]
+                open_slots = attack_slots + defense_slots
+                chosen_token = ""
+                chooser = getattr(engine, "choose_summon_slot", None)
+                if callable(chooser) and open_slots:
+                    try:
+                        chosen_token = str(chooser(board_owner, chosen_uid, open_slots) or "").strip().lower()
+                    except Exception:
+                        chosen_token = ""
+                if chosen_token in {token.lower() for token in open_slots}:
+                    zone = "attack" if chosen_token.startswith("a") else "defense"
+                    slot = int(chosen_token[1:]) - 1
                 if slot is None:
-                    slot = engine._first_open(board_player.defense)
-                    zone = "defense"
+                    slot = engine._first_open(board_player.attack)
+                    zone = "attack"
+                    if slot is None:
+                        slot = engine._first_open(board_player.defense)
+                        zone = "defense"
             elif chosen_type == "artefatto":
                 blocked_slots = query_ops.get_blocked_artifact_slots_for_player(engine, owner_idx)
                 usable_slots = [idx for idx in range(state.ARTIFACT_SLOTS) if idx not in blocked_slots]

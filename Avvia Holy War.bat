@@ -24,7 +24,7 @@ if errorlevel 1 (
 )
 
 echo Avvio di Holy War...
-"%HOLYWAR_PYTHON%" -B -m holywar.web --cards-json "holywar\data\cards.json"
+"%HOLYWAR_PYTHON%" -B -m holywar.web --cards-json "holywar\data\cards.json" %*
 exit /b %errorlevel%
 
 :errore

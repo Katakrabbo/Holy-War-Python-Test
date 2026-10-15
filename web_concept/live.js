@@ -75,6 +75,19 @@ function setMessage(message, isError = false) {
   setMessage.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
 }
 
+function previewStat(label, current, base) {
+  if (current == null) return "";
+  const currentNumber = Number(current);
+  const baseNumber = Number(base);
+  let tone = "";
+  if (Number.isFinite(currentNumber) && Number.isFinite(baseNumber)) {
+    if (currentNumber > baseNumber) tone = " stat-buffed";
+    if (currentNumber < baseNumber) tone = " stat-debuffed";
+  }
+  const original = base == null ? "" : ` <small class="stat-base">(${base})</small>`;
+  return `<span>${label} <b class="stat-current${tone}">${current}</b>${original}</span>`;
+}
+
 function showCard(card, element = null) {
   if (!card || card.hidden) return;
   ui.selectedUid = card.uid;
@@ -86,8 +99,8 @@ function showCard(card, element = null) {
   $("#preview-name").textContent = card.name;
   $("#preview-effect").textContent = card.effect || "Nessun testo effetto.";
   const stats = [`<span>Costo <b>${card.cost ?? "–"}</b></span>`];
-  if (card.strength != null) stats.push(`<span>Forza <b>${card.strength}</b></span>`);
-  if (card.faith != null) stats.push(`<span>Fede <b>${card.faith}</b></span>`);
+  if (card.strength != null) stats.push(previewStat("Forza", card.strength, card.base_strength));
+  if (card.faith != null) stats.push(previewStat("Fede", card.faith, card.base_faith));
   $("#preview-stats").innerHTML = stats.join("");
   $(".inspector").classList.add("open");
 }

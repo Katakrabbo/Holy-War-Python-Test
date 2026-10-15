@@ -269,6 +269,10 @@ class GameEngine:
     def draw_cards(self, player_idx: int, amount: int) -> int:
         return turn_flow_ops.draw_cards(self, player_idx, amount)
 
+    # Continues a multi-card draw that was paused by a mandatory runtime choice.
+    def resume_pending_draws(self) -> None:
+        turn_flow_ops.resume_pending_draws(self)
+
     # Plays a card from hand through the main gameplay entry point.
     def play_card(self, player_idx: int, hand_index: int, target: str | None = None) -> ActionResult:
         player = self.state.players[player_idx]

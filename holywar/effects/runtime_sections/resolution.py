@@ -270,6 +270,18 @@ class RuntimeResolutionMixin:
         if not script.on_activate_actions:
             return (False, "Questa carta non ha un effetto attivabile.")
 
+        activation_context = RuleEventContext(
+            engine=engine,
+            event="on_activate",
+            player_idx=player_idx,
+            payload={"card": uid},
+        )
+        if not any(
+            not action.condition or self._eval_condition_node(activation_context, player_idx, action.condition)
+            for action in script.on_activate_actions
+        ):
+            return (False, "Le condizioni per attivare questa abilita non sono soddisfatte.")
+
         # Check activation requirements if defined in the card script
         return self._validate_manual_target_actions(
             engine=engine,
@@ -796,6 +808,8 @@ class RuntimeResolutionMixin:
                 if _te.trigger.event in {"on_my_turn_start", "on_my_turn_end"} and ctx.player_idx != _owner:
                     return
                 if _te.trigger.event in {"on_opponent_turn_start", "on_opponent_turn_end"} and ctx.player_idx != (1 - _owner):
+                    return
+                if _te.trigger.event == "on_opponent_draws" and ctx.player_idx != _owner:
                     return
                 if _te.trigger.event.startswith("on_this_card_"):
                     event_uid = str(ctx.payload.get("card", ctx.payload.get("saint", ctx.payload.get("token", ""))))

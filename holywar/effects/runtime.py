@@ -204,6 +204,7 @@ SUPPORTED_EFFECT_ACTIONS = {
     "draw_cards_from_flag",
     "choose_targets",
     "choose_up_to_n_from_hand_to_relicario_then_draw_same",
+    "optional_redraw_event_card",
     "choose_option",
     "inflict_sin_from_flag",
     "store_target_faith",

@@ -1179,6 +1179,24 @@ button:focus-visible {
   font-size: .78rem;
 }
 
+.preview-stats .stat-current {
+  color: inherit;
+}
+
+.preview-stats .stat-current.stat-buffed {
+  color: #72d99a;
+}
+
+.preview-stats .stat-current.stat-debuffed {
+  color: #ff7777;
+}
+
+.preview-stats .stat-base {
+  color: #aeb8bc;
+  font-size: .72rem;
+  font-weight: 500;
+}
+
 .effect-box {
   padding: 12px;
   border-radius: 8px;

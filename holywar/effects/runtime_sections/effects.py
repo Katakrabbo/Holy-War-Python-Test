@@ -512,7 +512,9 @@ class RuntimeEffectsMixin(
 
             player = engine.state.players[target]
             max_cards = max(0, int(effect.amount or 0))
-            candidates = list(player.hand)
+            # A scripted target can narrow the selectable hand cards (Ptah uses
+            # this to expose only cards drawn during the current turn).
+            candidates = [uid for uid in targets if uid in player.hand] if targets else list(player.hand)
             if not candidates or max_cards <= 0:
                 return
 
@@ -521,8 +523,10 @@ class RuntimeEffectsMixin(
             flags.pop("_runtime_choice_labels", None)
             flags["_runtime_choice_candidates"] = ";;".join(candidates)
             flags["_runtime_choice_owner"] = str(target)
-            flags["_runtime_choice_title"] = "Prigioniero Sacrificale"
-            flags["_runtime_choice_prompt"] = "Scegli fino a 3 carte dalla tua mano da rimettere nel reliquiario."
+            flags["_runtime_choice_title"] = str(effect.choice_title or "Prigioniero Sacrificale")
+            flags["_runtime_choice_prompt"] = str(
+                effect.choice_prompt or "Scegli fino a 3 carte dalla tua mano da rimettere nel reliquiario."
+            )
             flags["_runtime_choice_min_targets"] = "0"
             flags["_runtime_choice_max_targets"] = str(max_cards)
             flags["_runtime_choice_ready"] = False
@@ -534,6 +538,81 @@ class RuntimeEffectsMixin(
             flags["_runtime_trigger_action"] = "choose_up_to_n_from_hand_to_relicario_then_draw_same"
             flags["_runtime_trigger_target_player"] = str(effect.target_player or "me")
             flags["_runtime_trigger_amount"] = str(max_cards)
+            return
+
+        if action == "optional_redraw_event_card":
+            flags = engine.state.flags
+            expected_choice_source = f"{source_uid}:optional_redraw_event_card"
+            choice_source = str(flags.get("_runtime_choice_source", "")).strip()
+            choice_ready = bool(flags.get("_runtime_choice_ready"))
+
+            if choice_ready and choice_source == expected_choice_source:
+                selected = str(flags.get("_runtime_choice_selected", "")).strip().lower()
+                event_uid = str(flags.pop("_runtime_redraw_event_card", "")).strip()
+                for key in (
+                    "_runtime_choice_source",
+                    "_runtime_choice_ready",
+                    "_runtime_choice_selected",
+                    "_runtime_choice_values",
+                    "_runtime_choice_labels",
+                    "_runtime_choice_owner",
+                    "_runtime_choice_title",
+                    "_runtime_choice_prompt",
+                    "_runtime_choice_min_targets",
+                    "_runtime_choice_max_targets",
+                ):
+                    flags.pop(key, None)
+                if selected != "yes" or event_uid not in engine.state.instances:
+                    return
+                drawn_owner = int(engine.state.instances[event_uid].owner)
+                drawn_player = engine.state.players[drawn_owner]
+                if event_uid not in drawn_player.hand:
+                    return
+                usage = flags.setdefault("effect_usage_per_turn", {})
+                usage_key = f"optional_redraw_event_card:{owner_idx}:{source_uid}"
+                if int(usage.get(usage_key, 0)) >= 1:
+                    return
+                # Consume Faro only when its controller accepts. Set the marker
+                # before the replacement draw to suppress recursive activation.
+                usage[usage_key] = 1
+                drawn_player.hand.remove(event_uid)
+                drawn_player.deck.append(event_uid)
+                engine.rng.shuffle(drawn_player.deck)
+                engine.draw_cards(drawn_owner, 1)
+                return
+
+            event_uid = str(flags.get("_runtime_event_card", "")).strip()
+            if event_uid not in engine.state.instances:
+                return
+            drawn_owner = int(engine.state.instances[event_uid].owner)
+            if event_uid not in engine.state.players[drawn_owner].hand:
+                return
+
+            # Once accepted, Faro is unavailable for the rest of this turn.
+            usage = flags.setdefault("effect_usage_per_turn", {})
+            usage_key = f"optional_redraw_event_card:{owner_idx}:{source_uid}"
+            if int(usage.get(usage_key, 0)) >= 1:
+                return
+
+            flags["_runtime_redraw_event_card"] = event_uid
+            flags["_runtime_choice_source"] = expected_choice_source
+            flags["_runtime_choice_values"] = "yes;;no"
+            flags["_runtime_choice_labels"] = json.dumps({"yes": "Si", "no": "No"}, ensure_ascii=False)
+            flags["_runtime_choice_owner"] = str(owner_idx)
+            flags["_runtime_choice_title"] = str(effect.choice_title or "Faro di Alessandria")
+            flags["_runtime_choice_prompt"] = str(
+                effect.choice_prompt
+                or "L'avversario ha pescato una carta. Vuoi rimischiarla nel reliquiario e fargli pescare di nuovo?"
+            )
+            flags["_runtime_choice_min_targets"] = "1"
+            flags["_runtime_choice_max_targets"] = "1"
+            flags["_runtime_choice_ready"] = False
+            flags["_runtime_reveal_card"] = source_uid
+            flags["_runtime_waiting_for_reveal"] = True
+            flags["_runtime_resume_source"] = source_uid
+            flags["_runtime_resume_owner"] = str(owner_idx)
+            flags["_runtime_pending_mode"] = "trigger_action"
+            flags["_runtime_trigger_action"] = "optional_redraw_event_card"
             return
 
         if action == "choose_targets_and_summon_to_field":

@@ -216,7 +216,8 @@ def draw_cards(engine: "GameEngine", player_idx: int, amount: int) -> int:
     promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
     promise_active = bool(promise_state.get(str(player_idx), False))
     drawn = 0
-    for _ in range(amount):
+    requested = max(0, int(amount))
+    for draw_index in range(requested):
         if not hand_has_space_for_non_innata(player, engine.state.instances):
             break
         source_pool = player.graveyard if promise_active else player.deck
@@ -287,8 +288,61 @@ def draw_cards(engine: "GameEngine", player_idx: int, amount: int) -> int:
 
         engine._emit_event("after_card_drawn_from_deck", player_idx, card=drawn_uid)
         engine._emit_event("on_opponent_draws", 1 - player_idx, card=drawn_uid, opponent=player_idx)
+
+        # Runtime choices must resolve before the next individual card is drawn.
+        # Preserve the remainder so the web UI (or another frontend) can resume
+        # the same draw operation after the controller answers.
+        if engine.state.flags.get("_runtime_waiting_for_reveal"):
+            remaining = requested - draw_index - 1
+            if remaining > 0:
+                pending = engine.state.flags.setdefault("_runtime_pending_draw_requests", [])
+                pending.append({"player": int(player_idx), "amount": int(remaining)})
+            break
     refresh_player_flags(engine)
     return drawn
+
+
+def _finish_started_turn_after_draw(engine: "GameEngine", current: int, drawn: int) -> None:
+    player = engine.state.players[current]
+    runtime_state = ensure_runtime_state(engine)
+    engine._emit_event("on_draw_phase_end", current, player=current, drawn=drawn)
+
+    if runtime_state.get("request_end_turn_player", None) == current:
+        runtime_state.pop("request_end_turn_player", None)
+        engine.state.log(f"{player.name} termina immediatamente il turno.")
+        end_turn(engine)
+        return
+
+    set_phase(engine, "main")
+    engine._emit_event("on_main_phase_start", current, player=current)
+    engine.state.log(f"Turno {engine.state.turn_number}: {player.name} pesca {drawn} carte e ottiene 10 Ispirazione.")
+    refresh_player_flags(engine)
+
+
+def resume_pending_draws(engine: "GameEngine") -> None:
+    flags = engine.state.flags
+    if flags.get("_runtime_waiting_for_reveal"):
+        return
+
+    pending = flags.setdefault("_runtime_pending_draw_requests", [])
+    while pending and not flags.get("_runtime_waiting_for_reveal"):
+        request = pending.pop(0)
+        player_idx = int(request.get("player", engine.state.active_player))
+        amount = max(0, int(request.get("amount", 0)))
+        resumed = draw_cards(engine, player_idx, amount)
+        deferred = flags.get("_runtime_deferred_turn_draw")
+        if isinstance(deferred, dict) and int(deferred.get("player", -1)) == player_idx:
+            deferred["drawn"] = int(deferred.get("drawn", 0)) + resumed
+
+    if flags.get("_runtime_waiting_for_reveal") or pending:
+        return
+    deferred = flags.pop("_runtime_deferred_turn_draw", None)
+    if isinstance(deferred, dict):
+        _finish_started_turn_after_draw(
+            engine,
+            int(deferred.get("player", engine.state.active_player)),
+            int(deferred.get("drawn", 0)),
+        )
 
 # The _remove_unplayed_innate_cards function is called at the end of the preparation phase to remove any innata cards that were not played during the preparation turns. It checks the player's hand, deck, white deck, graveyard, excommunicated zone, attack, defense, artifacts, and building for any innata cards that are still present and removes them from the game state. This ensures that players cannot keep innata cards that were meant to be played during preparation if they were not used, maintaining the integrity of the preparation phase.
 def _remove_unplayed_innate_cards(engine: "GameEngine", player_idx: int) -> None:
@@ -469,18 +523,10 @@ def start_turn(engine: "GameEngine") -> None:
         return
 
     drawn = _run_draw_phase(engine, current)
-    engine._emit_event("on_draw_phase_end", current, player=current, drawn=drawn)
-
-    if runtime_state.get("request_end_turn_player", None) == current:
-        runtime_state.pop("request_end_turn_player", None)
-        engine.state.log(f"{player.name} termina immediatamente il turno.")
-        end_turn(engine)
+    if engine.state.flags.get("_runtime_waiting_for_reveal"):
+        engine.state.flags["_runtime_deferred_turn_draw"] = {"player": current, "drawn": drawn}
         return
-
-    set_phase(engine, "main")
-    engine._emit_event("on_main_phase_start", current, player=current)
-    engine.state.log(f"Turno {engine.state.turn_number}: {player.name} pesca {drawn} carte e ottiene 10 Ispirazione.")
-    refresh_player_flags(engine)
+    _finish_started_turn_after_draw(engine, current, drawn)
 
 
 # Completes end-of-turn effects and hands control to the next player or phase.

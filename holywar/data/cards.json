@@ -5,7 +5,7 @@
     "crosses": "2",
     "faith": 3,
     "strength": null,
-    "effect_text": "Finche questa carta è presente sul terreno, i tuoi Santi sono immuni agli effetti delle maledizioni.",
+    "effect_text": "Finche questa carta è presente sul terreno, i tuoi Santi sono immuni agli effetti delle maledizioni. Se Acqua, Terra, Aria e Fuoco sono presenti sul tuo terreno, puoi attivare il seguente effetto: evoca Dio, il Creatore dal tuo deck o mano senza pagare costo in Ispirazione.",
     "expansion": "CRI-1",
     "is_token": false,
     "aliases": []
@@ -49,7 +49,7 @@
     "crosses": "2",
     "faith": 3,
     "strength": null,
-    "effect_text": "All'inizio del tuo turno, ricevi +1 Ispirazione in questo turno.",
+    "effect_text": "All'inizio del tuo turno, ricevi +1 Ispirazione in questo turno. Se Acqua, Terra, Aria e Fuoco sono presenti sul tuo terreno, puoi attivare il seguente effetto: evoca Dio, il Creatore dal tuo deck o mano senza pagare costo in Ispirazione.",
     "expansion": "CRI-1",
     "is_token": false,
     "aliases": []
@@ -203,7 +203,7 @@
     "crosses": "2",
     "faith": 3,
     "strength": null,
-    "effect_text": "Alla fine del turno, ogni Santo con Croci pari o superiori a 4 perde 2 Fede.",
+    "effect_text": "Alla fine del turno, ogni Santo con Croci pari o superiori a 4 perde 2 Fede. Se Acqua, Terra, Aria e Fuoco sono presenti sul tuo terreno, puoi attivare il seguente effetto: evoca Dio, il Creatore dal tuo deck o mano senza pagare costo in Ispirazione.",
     "expansion": "CRI-1",
     "is_token": false,
     "aliases": []
@@ -665,7 +665,7 @@
     "crosses": "2",
     "faith": 3,
     "strength": null,
-    "effect_text": "Fino a quando questa carta è sul campo, previeni gli effetti degli Artefatti avversari che causerebbero la distruzione dei tuoi Santi.",
+    "effect_text": "Fino a quando questa carta è sul campo, previeni gli effetti degli Artefatti avversari che causerebbero la distruzione dei tuoi Santi. Se Acqua, Terra, Aria e Fuoco sono presenti sul tuo terreno, puoi attivare il seguente effetto: evoca Dio, il Creatore dal tuo deck o mano senza pagare costo in Ispirazione.",
     "expansion": "CRI-1",
     "is_token": false,
     "aliases": []

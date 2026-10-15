@@ -2,6 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from holywar.web import WebGameSession
 from holywar.effects.runtime import runtime_cards
 
@@ -60,6 +62,24 @@ def test_effect_target_options_include_complete_card_preview() -> None:
     assert "effect" in option["card"]
 
 
+def test_card_preview_exposes_current_and_original_combat_values() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    assert session.engine is not None
+    uid = next(
+        uid for uid, instance in session.engine.state.instances.items()
+        if instance.definition.strength is not None and instance.definition.faith is not None
+    )
+    instance = session.engine.state.instances[uid]
+    instance.current_faith = int(instance.definition.faith or 0) + 2
+
+    card = session._card(uid)
+
+    assert card is not None
+    assert card["base_strength"] == instance.definition.strength
+    assert card["base_faith"] == instance.definition.faith
+    assert card["faith"] == int(instance.definition.faith or 0) + 2
+
+
 def _move_named_card_to_hand(session: WebGameSession, player_idx: int, name: str) -> str:
     assert session.engine is not None
     player = session.engine.state.players[player_idx]
@@ -73,6 +93,205 @@ def _move_named_card_to_hand(session: WebGameSession, player_idx: int, name: str
             zone.remove(uid)
     player.hand.append(uid)
     return uid
+
+
+def _draw_control_test_payload(
+    *,
+    mode: str,
+    active_player: int,
+    player_attack: list[str] | None = None,
+    player_artifacts: list[str] | None = None,
+    opponent_attack: list[str] | None = None,
+    opponent_artifacts: list[str] | None = None,
+) -> dict:
+    draw_cards = ["Preghiera", "Cura", "Meditazione", "Rinforzi", "Perdono"]
+    return {
+        "mode": mode,
+        "active_player": active_player,
+        "initial_draw": True,
+        "players": [
+            {
+                "name": "Pellegrino",
+                "deck": draw_cards,
+                "attack": player_attack or [],
+                "artifacts": player_artifacts or [],
+            },
+            {
+                "name": "Custode",
+                "deck": draw_cards,
+                "attack": opponent_attack or [],
+                "artifacts": opponent_artifacts or [],
+            },
+        ],
+    }
+
+
+def test_element_artifacts_activate_creator_only_with_complete_set() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.start_test_game(
+        _draw_control_test_payload(
+            mode="local",
+            active_player=0,
+            player_artifacts=["Acqua", "Aria", "Fuoco", "Terra"],
+        )
+    )
+    assert session.engine is not None
+
+    cards = [session._card(uid) for uid in session.engine.state.players[0].artifacts]
+
+    assert all(card is not None and card["can_activate"] is False for card in cards)
+
+    complete_session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_artifacts=["Acqua", "Aria", "Fuoco", "Terra"],
+    )
+    payload["players"][0]["deck"].insert(0, "Dio, il Creatore")
+    complete_session.start_test_game(payload)
+    assert complete_session.engine is not None
+    player = complete_session.engine.state.players[0]
+    creator_uid = next(
+        uid for uid in player.deck
+        if complete_session.engine.state.instances[uid].definition.name == "Dio, il Creatore"
+    )
+    complete_cards = [complete_session._card(uid) for uid in player.artifacts]
+    inspiration_before = player.inspiration + player.temporary_inspiration
+
+    assert all(card is not None and card["can_activate"] is True for card in complete_cards)
+    assert all(
+        "evoca Dio, il Creatore dal tuo deck o mano senza pagare costo in Ispirazione" in card["effect"]
+        for card in complete_cards if card is not None
+    )
+
+    waiting = complete_session.action({"type": "activate", "source": "r1", "target": creator_uid})
+
+    decision = waiting["game"]["decision"]
+    assert decision["title"] == "Scegli locazione evocazione"
+    assert {option["value"] for option in decision["options"]} == {
+        "a1", "a2", "a3", "d1", "d2", "d3"
+    }
+
+    result = complete_session.resolve_decision({"id": decision["id"], "answer": "a2"})
+
+    assert result["ok"] is True
+    assert creator_uid not in player.deck
+    assert player.attack[1] == creator_uid
+    assert player.inspiration + player.temporary_inspiration == inspiration_before
+
+
+def test_ptah_prompts_with_only_cards_drawn_this_turn_and_replaces_one() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+
+    waiting = session.start_test_game(
+        _draw_control_test_payload(mode="local", active_player=0, player_attack=["Ptah"])
+    )
+
+    assert session.engine is not None
+    decision = waiting["game"]["decision"]
+    drawn_before = list(session.engine.state.flags["cards_drawn_this_turn"]["0"])
+    assert decision["title"] == "Ptah"
+    assert decision["allow_cancel"] is True
+    assert {option["value"] for option in decision["options"]} == set(drawn_before)
+    assert len(drawn_before) == 3
+
+    resolved = session.resolve_decision({"id": decision["id"], "answer": drawn_before[0]})
+
+    assert resolved["game"]["decision"] is None
+    assert len(session.engine.state.players[0].hand) == 3
+    assert len(session.engine.state.flags["cards_drawn_this_turn"]["0"]) == 4
+
+
+@pytest.mark.parametrize("chain_enabled", [True, False])
+def test_faro_prompts_on_opponent_draw_without_revealing_card_and_replaces_it(chain_enabled: bool) -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.chain_enabled = chain_enabled
+
+    waiting = session.start_test_game(
+        _draw_control_test_payload(mode="local", active_player=1, player_artifacts=["Faro di Alessandria"])
+    )
+
+    assert session.engine is not None
+    decision = waiting["game"]["decision"]
+    assert decision["title"] == "Faro di Alessandria"
+    assert {option["value"] for option in decision["options"]} == {"yes", "no"}
+    assert all("card" not in option for option in decision["options"])
+    assert decision["revealed_card"] is None
+
+    resolved = session.resolve_decision({"id": decision["id"], "answer": "yes"})
+
+    assert resolved["game"]["decision"] is None
+    assert len(session.engine.state.players[1].hand) == 3
+    assert len(session.engine.state.flags["cards_drawn_this_turn"]["1"]) == 4
+
+
+def test_faro_can_decline_one_draw_and_trigger_again_on_the_next() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    waiting = session.start_test_game(
+        _draw_control_test_payload(mode="local", active_player=1, player_artifacts=["Faro di Alessandria"])
+    )
+    assert session.engine is not None
+    first = waiting["game"]["decision"]
+    assert len(session.engine.state.players[1].hand) == 1
+
+    waiting_again = session.resolve_decision({"id": first["id"], "answer": "no"})
+
+    second = waiting_again["game"]["decision"]
+    assert second["title"] == "Faro di Alessandria"
+    assert len(session.engine.state.players[1].hand) == 2
+
+    resolved = session.resolve_decision({"id": second["id"], "answer": "yes"})
+
+    assert resolved["game"]["decision"] is None
+    assert len(session.engine.state.players[1].hand) == 3
+    assert len(session.engine.state.flags["cards_drawn_this_turn"]["1"]) == 4
+
+
+@pytest.mark.parametrize(
+    ("active_player", "opponent_attack", "opponent_artifacts"),
+    [(1, ["Ptah"], []), (0, [], ["Faro di Alessandria"])],
+)
+def test_cpu_resolves_draw_control_choices(
+    active_player: int,
+    opponent_attack: list[str],
+    opponent_artifacts: list[str],
+) -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+
+    result = session.start_test_game(
+        _draw_control_test_payload(
+            mode="ai",
+            active_player=active_player,
+            opponent_attack=opponent_attack,
+            opponent_artifacts=opponent_artifacts,
+        )
+    )
+
+    assert session.engine is not None
+    drawn_player = active_player
+    assert result["game"]["decision"] is None
+    assert len(session.engine.state.players[drawn_player].hand) == 3
+    assert len(session.engine.state.flags["cards_drawn_this_turn"][str(drawn_player)]) == 4
+
+
+def test_opponent_draw_trigger_only_affects_the_correct_controller() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+
+    session.start_test_game(
+        _draw_control_test_payload(
+            mode="local",
+            active_player=0,
+            player_attack=["Frate Curatore"],
+            opponent_attack=["Frate Curatore"],
+        )
+    )
+
+    assert session.engine is not None
+    player_frate = session.engine.state.players[0].attack[0]
+    opponent_frate = session.engine.state.players[1].attack[0]
+    assert player_frate is not None and opponent_frate is not None
+    assert session.engine.state.instances[player_frate].current_faith == 3
+    assert session.engine.state.instances[opponent_frate].current_faith == 6
 
 
 def test_no_target_effect_cards_are_ready_and_play_without_target() -> None:

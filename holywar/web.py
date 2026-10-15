@@ -590,7 +590,9 @@ class WebGameSession:
             "type": definition.card_type,
             "cost": definition.faith,
             "faith": inst.current_faith,
+            "base_faith": definition.faith,
             "strength": strength,
+            "base_strength": definition.strength,
             "crosses": definition.crosses,
             "effect": definition.effect_text,
             "expansion": definition.expansion,
@@ -861,6 +863,7 @@ class WebGameSession:
             flags["_runtime_waiting_for_reveal"] = False
             flags.pop("_runtime_reveal_card", None)
             runtime_cards.resume_pending_effect(self.engine)
+            self.engine.resume_pending_draws()
         if self.post_runtime_chain_actor is not None and self._runtime_decision() is None:
             actor_idx = self.post_runtime_chain_actor
             self.post_runtime_chain_actor = None
@@ -910,6 +913,7 @@ class WebGameSession:
             def resume() -> None:
                 assert self.engine is not None
                 runtime_cards.resume_pending_effect(self.engine)
+                self.engine.resume_pending_draws()
                 if self.post_runtime_chain_actor is not None and self._runtime_decision() is None:
                     actor_idx = self.post_runtime_chain_actor
                     self.post_runtime_chain_actor = None

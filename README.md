@@ -12,6 +12,14 @@ pip install -e .[dev]
 
 ## Avvio
 
+Se hai Node.js installato, dalla cartella del progetto puoi avviare l'app come una normale app web:
+
+```powershell
+npm run dev
+```
+
+Al primo avvio il comando crea automaticamente `.venv`, installa le dipendenze Python mancanti e apre `http://127.0.0.1:5174/`. Arresta il server con `Ctrl+C`. Non serve eseguire `npm install`, perche il progetto non ha dipendenze Node.
+
 Su Windows puoi fare doppio clic su `Avvia Holy War.bat`: al primo avvio crea automaticamente `.venv`, installa le dipendenze mancanti e apre l'interfaccia web.
 
 In alternativa:
@@ -22,6 +30,12 @@ In alternativa:
 
 Il comando apre `http://127.0.0.1:5174/` e mantiene tutte le regole nel motore Python.
 Per non aprire automaticamente il browser aggiungi `--no-browser`.
+
+Lo stesso parametro funziona anche con il comando npm:
+
+```powershell
+npm run dev -- --no-browser
+```
 
 Prima di aggiungere o modificare carte puoi controllare dati e script senza avviare una partita:
 
