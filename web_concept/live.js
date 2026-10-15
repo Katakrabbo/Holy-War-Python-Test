@@ -1406,6 +1406,9 @@ $("#menu-button").addEventListener("click", openPause);
 $("#resume-button").addEventListener("click", () => pauseDialog.close());
 $("#pause-help-button").addEventListener("click", () => { pauseDialog.close(); helpDialog.showModal(); });
 $("#pause-log-button").addEventListener("click", () => { pauseDialog.close(); $("#match-log").focus(); });
+$("#bug-report-button").addEventListener("click", () => {
+  window.open("https://forms.gle/c195nMKhR8WKRpP87", "_blank", "noopener,noreferrer");
+});
 $("#surrender-button").addEventListener("click", () => surrenderDialog.showModal());
 $("#pause-surrender-button").addEventListener("click", () => { pauseDialog.close(); surrenderDialog.showModal(); });
 $("#confirm-surrender-button").addEventListener("click", () => { surrenderDialog.close(); sendAction({ type: "surrender" }); });
