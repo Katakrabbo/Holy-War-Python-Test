@@ -166,6 +166,8 @@ class RuntimeEffectsConditionsMixin:
             source_uid = str(payload.get("source", "")).strip()
             if not source_uid:
                 source_uid = str(ctx.engine.state.flags.get("_runtime_source_card", "")).strip()
+            if not source_uid:
+                source_uid = str(payload.get("card", "")).strip()
             if not source_uid or source_uid not in ctx.engine.state.instances:
                 return False
             source_inst = ctx.engine.state.instances[source_uid]

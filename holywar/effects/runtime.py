@@ -118,6 +118,7 @@ SUPPORTED_EFFECT_ACTIONS = {
     "remove_seal_counter",
     "campana_add_counter",
     "campana_remove_counter",
+    "campana_spend_counters_grant_faith",
     "cataclisma_ciclico",
     "kah_ok_tick",
     "trombe_del_giudizio_tick",

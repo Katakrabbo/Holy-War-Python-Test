@@ -180,6 +180,43 @@ def test_element_artifacts_activate_creator_only_with_complete_set() -> None:
     assert player.inspiration + player.temporary_inspiration == inspiration_before
 
 
+def test_campana_gains_turn_counter_and_spends_chosen_amount_to_buff_all_saints() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.start_test_game(
+        _draw_control_test_payload(
+            mode="local",
+            active_player=0,
+            player_attack=["Araldo della Fine"],
+            player_artifacts=["Campana"],
+        )
+    )
+    assert session.engine is not None
+    player = session.engine.state.players[0]
+    campana_uid = next(uid for uid in player.artifacts if uid)
+    campana = session.engine.state.instances[campana_uid]
+    saint_uid = next(uid for uid in player.attack if uid)
+    saint = session.engine.state.instances[saint_uid]
+
+    assert "campana_counter:1" in campana.blessed
+    campana.blessed.remove("campana_counter:1")
+    campana.blessed.append("campana_counter:3")
+    faith_before = int(saint.current_faith or 0)
+    inspiration_before = player.inspiration + player.temporary_inspiration
+
+    waiting = session.action({"type": "activate", "source": "r1"})
+    decision = waiting["game"]["decision"]
+
+    assert decision["title"] == "Campana"
+    assert {option["value"] for option in decision["options"]} == {"1", "2", "3"}
+
+    resolved = session.resolve_decision({"id": decision["id"], "answer": "2"})
+
+    assert resolved["ok"] is True
+    assert "campana_counter:1" in campana.blessed
+    assert saint.current_faith == faith_before + 2
+    assert player.inspiration + player.temporary_inspiration == inspiration_before
+
+
 def test_ptah_prompts_with_only_cards_drawn_this_turn_and_replaces_one() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
 
