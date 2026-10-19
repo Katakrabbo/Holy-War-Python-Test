@@ -30,11 +30,17 @@ internal sealed class MockMultiplayerProvider : IMultiplayerProvider
             case "create_lobby":
                 EnsureLoggedIn();
                 _lobbyId = $"mock-{Guid.NewGuid():N}";
-                return new { lobbyId = _lobbyId, ownerId = _userId, maxMembers = 2 };
+                return new { lobbyId = _lobbyId, ownerId = _userId, maxMembers = 7 };
+            case "find_lobbies":
+                EnsureLoggedIn();
+                return new { rooms = Array.Empty<object>() };
+            case "update_lobby":
+                EnsureInLobby();
+                return new { updated = true };
             case "join_lobby":
                 EnsureLoggedIn();
                 _lobbyId = ReadRequiredString(payload, "lobbyId");
-                return new { lobbyId = _lobbyId, ownerId = "mock-host", maxMembers = 2 };
+                return new { lobbyId = _lobbyId, ownerId = "mock-host", maxMembers = 7 };
             case "leave_lobby":
                 _lobbyId = null;
                 return new { left = true };

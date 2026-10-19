@@ -95,10 +95,22 @@ Prerequisiti sul solo PC usato per creare l'installer:
 
 Gli amici che installano il gioco non devono avere Python, Node.js, .NET o Inno Setup.
 
-Comando completo (build exe + setup installer):
+Dalla cartella principale del progetto, il comando da usare per generare l'installer completo e:
 
 ```powershell
-.\scripts\build_installer.ps1 -Version 0.2.0
+.\scripts\build_installer.ps1 -Version "0.4.0"
+```
+
+Per una nuova release, sostituisci `0.4.0` con il numero di versione desiderato. Ad esempio:
+
+```powershell
+.\scripts\build_installer.ps1 -Version "0.4.1"
+```
+
+Se PowerShell impedisce l'esecuzione degli script per la policy locale, usa:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\build_installer.ps1" -Version "0.4.0"
 ```
 
 Il comando crea automaticamente `.venv` se manca, installa gli strumenti di build,
@@ -108,7 +120,7 @@ prima di compilare l'installer.
 Comando rapido (se hai gia `dist\HolyWar` e vuoi solo rigenerare il setup):
 
 ```powershell
-.\scripts\build_installer.ps1 -Version 0.2.0 -SkipPyInstaller
+.\scripts\build_installer.ps1 -Version "0.4.0" -SkipPyInstaller
 ```
 
 Cosa fa lo script:

@@ -25,10 +25,26 @@ class RuntimeEffectsConditionsMixin:
             return True
         return self._eval_condition_node(ctx, owner_idx, condition)
 
+    def _condition_reads_opponent(self, value: Any) -> bool:
+        """Return whether a scripted condition depends on the hidden side."""
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                key_norm = _norm(str(key))
+                if "opponent" in key_norm or "enemy" in key_norm or key_norm.startswith("both_players"):
+                    return True
+                if self._condition_reads_opponent(nested):
+                    return True
+            return False
+        if isinstance(value, (list, tuple, set)):
+            return any(self._condition_reads_opponent(item) for item in value)
+        return _norm(str(value)) in {"opponent", "enemy", "other"}
+
     # This method evaluates a condition node, which can contain logical operators ("all_of", "any_of", "not") and leaf conditions. It processes the logical structure accordingly and ultimately evaluates the leaf conditions to determine if the overall condition is satisfied.
     def _eval_condition_node(self, ctx: "RuleEventContext", owner_idx: int, node: dict[str, Any]) -> bool:
         if not node:
             return True
+        if ctx.engine.state.phase == "preparation" and self._condition_reads_opponent(node):
+            return False
         all_of = node.get("all_of")
         if isinstance(all_of, list):
             for sub in all_of:

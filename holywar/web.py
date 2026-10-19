@@ -45,7 +45,7 @@ DEFAULT_AI_DECK = "cristianesimo_b1_sigilli_martirio"
 class WebGameSession:
     """Single local match shared by the local browser UI."""
 
-    def __init__(self, cards_path: Path, seed: int | None = None) -> None:
+    def __init__(self, cards_path: Path, seed: int | None = None, *, autoload: bool = True) -> None:
         self.cards = load_cards_json(cards_path)
         self.seed = seed
         self.rng = random.Random(seed)
@@ -53,7 +53,8 @@ class WebGameSession:
         self.mode = "ai"
         self.ai_steps = 0
         self.chain_active = False
-        self.chain_enabled = True
+        self._chain_enabled = [True, True]
+        self.chain_participants: list[int] = []
         self.chain_priority_idx = 0
         self.chain_pass_count = 0
         self.post_runtime_chain_actor: int | None = None
@@ -67,7 +68,19 @@ class WebGameSession:
         self.decision_answer: Any = None
         self._decision_waiting = object()
         self.decision_counter = 0
-        self.new_game({})
+        self.coin_toss_pending = False
+        self.coin_toss_confirmed: set[int] = set()
+        if autoload:
+            self.new_game({})
+
+    @property
+    def chain_enabled(self) -> bool:
+        """Compatibility view for callers that predate per-player chain settings."""
+        return bool(self._chain_enabled[0])
+
+    @chain_enabled.setter
+    def chain_enabled(self, enabled: bool) -> None:
+        self._chain_enabled = [bool(enabled), bool(enabled)]
 
     def _bind_choices(self) -> None:
         if self.engine is None:
@@ -293,9 +306,13 @@ class WebGameSession:
             self.rng = random.Random(self.seed)
             self.ai_steps = 0
             self.chain_active = False
+            self._chain_enabled = [True, True]
+            self.chain_participants = []
             self.chain_priority_idx = 0
             self.chain_pass_count = 0
             self.post_runtime_chain_actor = None
+            self.coin_toss_pending = False
+            self.coin_toss_confirmed.clear()
             self._bind_choices()
             self.engine.start_turn()
             return self.snapshot(message="Nuova partita avviata.")
@@ -455,9 +472,13 @@ class WebGameSession:
             self.rng = random.Random(self.seed)
             self.ai_steps = 0
             self.chain_active = False
+            self._chain_enabled = [True, True]
+            self.chain_participants = []
             self.chain_priority_idx = active_player
             self.chain_pass_count = 0
             self.post_runtime_chain_actor = None
+            self.coin_toss_pending = False
+            self.coin_toss_confirmed.clear()
             self._bind_choices()
             for owner, uids in innate_uids.items():
                 for uid in uids:
@@ -884,6 +905,17 @@ class WebGameSession:
         if self._runtime_decision() is not None:
             self.engine.state.flags["_web_start_turn_after_runtime_choice"] = True
             return
+        if (
+            self.engine.state.preparation_turns_done >= 2
+            and self.engine.state.coin_toss_winner in {0, 1}
+            and self.engine.state.turn_number == 1
+            and str(self.engine.state.flags.get("runtime_state", {}).get("phase", "")) == "setup"
+        ):
+            self.coin_toss_pending = True
+            self.coin_toss_confirmed.clear()
+            if self.mode == "ai":
+                self.coin_toss_confirmed.add(1)
+            return
         if self.mode == "ai":
             self._start_next_turn()
         elif self.engine.state.winner is None:
@@ -894,10 +926,7 @@ class WebGameSession:
             return
         if not bool(self.engine.state.flags.pop("_web_start_turn_after_runtime_choice", False)):
             return
-        if self.mode == "ai":
-            self._start_next_turn()
-        elif self.engine.state.winner is None:
-            self.engine.start_turn()
+        self._finish_turn_transition()
 
     def resolve_runtime_decision(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
@@ -1112,12 +1141,12 @@ class WebGameSession:
                 "legacy_requires_target": legacy_requires_target,
             }
 
-    def _player(self, player_idx: int, *, reveal_hand: bool) -> dict[str, Any]:
+    def _player(self, player_idx: int, *, reveal_hand: bool, hide_field: bool = False) -> dict[str, Any]:
         assert self.engine is not None
         player = self.engine.state.players[player_idx]
         promise = dict(self.engine.state.flags.get("oltretomba_promise_active", {}) or {})
-        attack_cards = [self._card(uid) for uid in player.attack]
-        defense_cards = [self._card(uid) for uid in player.defense]
+        attack_cards = [None] * len(player.attack) if hide_field else [self._card(uid) for uid in player.attack]
+        defense_cards = [None] * len(player.defense) if hide_field else [self._card(uid) for uid in player.defense]
         if player_idx == self.engine.state.active_player:
             for index, card in enumerate(attack_cards):
                 if card is not None:
@@ -1137,14 +1166,15 @@ class WebGameSession:
                 self._card(uid, hidden=not reveal_hand, hand_owner=player_idx if reveal_hand else None)
                 for uid in player.hand
             ],
-            "graveyard": [self._card(uid) for uid in player.graveyard],
-            "excommunicated": [self._card(uid) for uid in player.excommunicated],
+            "field_hidden": hide_field,
+            "graveyard": [] if hide_field else [self._card(uid) for uid in player.graveyard],
+            "excommunicated": [] if hide_field else [self._card(uid) for uid in player.excommunicated],
             "graveyard_acts_as_deck": bool(promise.get(str(player_idx), False)),
             "excommunicated_acts_as_deck": False,
             "attack": attack_cards,
             "defense": defense_cards,
-            "artifacts": [self._card(uid) for uid in player.artifacts],
-            "building": self._card(player.building),
+            "artifacts": [None] * len(player.artifacts) if hide_field else [self._card(uid) for uid in player.artifacts],
+            "building": None if hide_field else self._card(player.building),
         }
 
     def _valid_attack_targets(self, player_idx: int, from_slot: int) -> list[str]:
@@ -1234,27 +1264,34 @@ class WebGameSession:
     def _start_chain(self, actor_idx: int) -> None:
         if (
             self.engine is None
-            or not self.chain_enabled
+            or self.engine.state.phase == "preparation"
             or self.chain_active
             or self.engine.state.flags.get("_runtime_waiting_for_reveal")
         ):
             return
-        defender = 1 - actor_idx
-        if not self._quick_hand_indexes(defender):
+        turn_owner = int(self.engine.state.active_player)
+        participants = [
+            player_idx for player_idx in (turn_owner, 1 - turn_owner)
+            if self._chain_enabled[player_idx] and self._quick_hand_indexes(player_idx)
+        ]
+        if not participants:
             return
         self.chain_active = True
-        self.chain_priority_idx = defender
+        self.chain_participants = participants
+        self.chain_priority_idx = participants[0]
         self.chain_pass_count = 0
 
     def _chain_pass(self) -> str:
         if not self.chain_active:
             return "Nessuna catena attiva."
         self.chain_pass_count += 1
-        if self.chain_pass_count >= 2:
+        if self.chain_pass_count >= max(1, len(self.chain_participants)):
             self.chain_active = False
+            self.chain_participants = []
             self.chain_pass_count = 0
             return "Catena risolta."
-        self.chain_priority_idx = 1 - self.chain_priority_idx
+        current = self.chain_participants.index(self.chain_priority_idx)
+        self.chain_priority_idx = self.chain_participants[(current + 1) % len(self.chain_participants)]
         return "Priorita passata."
 
     def _perform_ai_chain_step(self) -> Any:
@@ -1264,7 +1301,8 @@ class WebGameSession:
             result = self.engine.quick_play(self.chain_priority_idx, hand_index, target)
             if result.ok:
                 self.chain_pass_count = 0
-                self.chain_priority_idx = 1 - self.chain_priority_idx
+                current = self.chain_participants.index(self.chain_priority_idx)
+                self.chain_priority_idx = self.chain_participants[(current + 1) % len(self.chain_participants)]
                 return result
         return self._chain_pass()
 
@@ -1274,24 +1312,35 @@ class WebGameSession:
         ok: bool = True,
         message: str = "",
         viewer_idx: int | None = None,
+        spectator: bool = False,
     ) -> dict[str, Any]:
-        assert self.engine is not None
+        if self.engine is None:
+            return {"ok": ok, "message": message, "game": None}
         state = self.engine.state
         runtime_state = dict(state.flags.get("runtime_state", {}) or {})
         raw_decision = self.pending_decision or self._runtime_decision()
         if viewer_idx is not None and viewer_idx not in {0, 1}:
             raise ValueError("Indice spettatore non valido.")
         if viewer_idx is None and self.mode == "local":
-            viewer_idx = int(raw_decision["player_index"]) if raw_decision is not None else (
-                self.chain_priority_idx if self.chain_active else state.active_player
-            )
+            if self.coin_toss_pending:
+                viewer_idx = next((idx for idx in (0, 1) if idx not in self.coin_toss_confirmed), state.active_player)
+            else:
+                viewer_idx = int(raw_decision["player_index"]) if raw_decision is not None else (
+                    self.chain_priority_idx if self.chain_active else state.active_player
+                )
         elif viewer_idx is None:
             viewer_idx = 0
-        decision = raw_decision if raw_decision is not None and int(raw_decision["player_index"]) == viewer_idx else None
+        decision = (
+            raw_decision
+            if not spectator and raw_decision is not None and int(raw_decision["player_index"]) == viewer_idx
+            else None
+        )
         opponent_idx = 1 - viewer_idx
         relative_winner = None
         if state.winner is not None:
             relative_winner = 0 if state.winner == viewer_idx else 1
+        hide_opponent_field = not spectator and (state.phase == "preparation" or self.coin_toss_pending)
+        coin_winner = state.coin_toss_winner if state.coin_toss_winner in {0, 1} else None
         return {
             "ok": ok,
             "message": message,
@@ -1304,28 +1353,36 @@ class WebGameSession:
                 "phase": runtime_state.get("phase", state.phase),
                 "preparation": state.phase == "preparation",
                 "winner": relative_winner,
-                "can_act": state.winner is None and (
+                "spectator": spectator,
+                "can_act": not spectator and not self.coin_toss_pending and state.winner is None and (
                     self.chain_active and self.chain_priority_idx == viewer_idx
                     or not self.chain_active and state.active_player == viewer_idx
                 ),
-                "ai_pending": self.mode == "ai" and state.winner is None and (
+                "ai_pending": self.mode == "ai" and not self.coin_toss_pending and state.winner is None and (
                     self.chain_active and self.chain_priority_idx == 1
                     or not self.chain_active and state.active_player == 1
                 ),
                 "chain": {
                     "active": self.chain_active,
-                    "enabled": self.chain_enabled,
+                    "enabled": self._chain_enabled[viewer_idx],
+                    "enabled_players": list(self._chain_enabled),
                     "priority": 0 if self.chain_priority_idx == viewer_idx else 1,
                     "passes": self.chain_pass_count,
                     "quick_cards": [state.players[viewer_idx].hand[index] for index in self._quick_hand_indexes(viewer_idx)]
                     if self.chain_active and self.chain_priority_idx == viewer_idx else [],
                 },
+                "coin_toss": {
+                    "pending": self.coin_toss_pending,
+                    "confirmed": viewer_idx in self.coin_toss_confirmed,
+                    "winner": None if coin_winner is None else (0 if coin_winner == viewer_idx else 1),
+                    "winner_name": "" if coin_winner is None else state.players[coin_winner].name,
+                },
                 "decision": decision,
                 "players": [
                     self._player(viewer_idx, reveal_hand=True),
-                    self._player(opponent_idx, reveal_hand=False),
+                    self._player(opponent_idx, reveal_hand=spectator, hide_field=hide_opponent_field),
                 ],
-                "logs": list(state.logs),
+                "logs": [] if hide_opponent_field else list(state.logs),
             },
         }
 
@@ -1343,12 +1400,34 @@ class WebGameSession:
             state = self.engine.state
             kind = str(payload.get("type") or "").strip().lower()
             if kind == "set_chain":
+                setting_actor = network_actor_idx if network_actor_idx is not None else (
+                    (self.chain_priority_idx if self.chain_active else state.active_player)
+                    if self.mode == "local" else 0
+                )
+                if setting_actor not in {0, 1}:
+                    return self.snapshot(ok=False, message="Identita giocatore non valida.")
                 enabled = bool(payload.get("enabled"))
-                self.chain_enabled = enabled
+                self._chain_enabled[setting_actor] = enabled
                 status = "attivata" if enabled else "disattivata"
-                if self.chain_active and not enabled:
+                if self.chain_active and setting_actor in self.chain_participants and not enabled:
                     return self.snapshot(message=f"Catena {status}. La catena gia aperta deve essere conclusa.")
-                return self.snapshot(message=f"Catena {status}.")
+                return self.snapshot(message=f"Catena {status} per {state.players[setting_actor].name}.")
+            if kind == "confirm_coin_toss":
+                if not self.coin_toss_pending:
+                    return self.snapshot(ok=False, message="Nessun lancio della moneta da confermare.")
+                actor_idx = network_actor_idx if network_actor_idx is not None else (
+                    next((idx for idx in (0, 1) if idx not in self.coin_toss_confirmed), state.active_player)
+                    if self.mode == "local" else 0
+                )
+                if actor_idx not in {0, 1}:
+                    return self.snapshot(ok=False, message="Identita giocatore non valida.")
+                self.coin_toss_confirmed.add(actor_idx)
+                if self.mode == "ai":
+                    self.coin_toss_confirmed.add(1)
+                if len(self.coin_toss_confirmed) < 2:
+                    return self.snapshot(message="Conferma registrata. In attesa dell'altro giocatore.")
+                self.coin_toss_pending = False
+                return self._run_and_snapshot(self.engine.start_turn)
             if state.winner is not None:
                 return self.snapshot(ok=False, message="La partita è terminata.")
             expected_actor_idx = self.chain_priority_idx if self.chain_active else state.active_player
@@ -1380,7 +1459,8 @@ class WebGameSession:
                         result = self.engine.quick_play(actor_idx, hand_index, str(target) if target else None)
                         if result.ok:
                             self.chain_pass_count = 0
-                            self.chain_priority_idx = 1 - actor_idx
+                            current = self.chain_participants.index(actor_idx)
+                            self.chain_priority_idx = self.chain_participants[(current + 1) % len(self.chain_participants)]
                         return result
                     result = self.engine.play_card(actor_idx, hand_index, str(target) if target else None)
                     if result.ok:
@@ -1470,6 +1550,8 @@ class WebGameSession:
             if self.engine is None:
                 raise ValueError("Partita non inizializzata.")
             state = self.engine.state
+            if self.coin_toss_pending:
+                return self.snapshot(message="Conferma prima il risultato del lancio della moneta.")
             if self.chain_active:
                 if self.chain_priority_idx != 1:
                     return self.snapshot(message="La catena attende il giocatore.")
@@ -1504,6 +1586,8 @@ class WebGameSession:
 class HolyWarRequestHandler(SimpleHTTPRequestHandler):
     session: WebGameSession
     multiplayer: MultiplayerService
+    user_settings: dict[str, str]
+    user_settings_path: Path
 
     def __init__(self, *args: Any, directory: str, **kwargs: Any) -> None:
         super().__init__(*args, directory=directory, **kwargs)
@@ -1535,6 +1619,9 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/config":
             self._send_json(self.session.config())
             return
+        if path == "/api/options":
+            self._send_json({"ok": True, **self.user_settings})
+            return
         if path == "/api/deck-editor":
             with self.session.lock:
                 self._send_json(self.session.deck_editor())
@@ -1552,6 +1639,9 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("Payload non valido.")
             path = urlparse(self.path).path
+            if path == "/api/multiplayer/find":
+                self._send_json(self.multiplayer.find_lobbies(payload))
+                return
             if path == "/api/multiplayer/host":
                 self._send_json(self.multiplayer.host(payload))
                 return
@@ -1560,6 +1650,20 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/multiplayer/leave":
                 self._send_json(self.multiplayer.leave())
+                return
+            if path == "/api/multiplayer/room-action":
+                self._send_json(self.multiplayer.room_action(payload))
+                return
+            if path == "/api/options":
+                username = str(payload.get("username") or "Pellegrino").strip()[:28] or "Pellegrino"
+                default_deck = str(payload.get("default_deck") or DEFAULT_PLAYER_DECK).strip()
+                self.session._deck_religion(default_deck)
+                self.user_settings.update({"username": username, "default_deck": default_deck})
+                self.user_settings_path.parent.mkdir(parents=True, exist_ok=True)
+                self.user_settings_path.write_text(
+                    json.dumps(self.user_settings, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                self._send_json({"ok": True, "message": "Opzioni salvate.", **self.user_settings})
                 return
             if path == "/api/new-game":
                 if self.multiplayer.active:
@@ -1659,6 +1763,12 @@ def _show_startup_error(log_path: Path) -> None:
 def _open_desktop_window(url: str, *, smoke_test: bool = False) -> None:
     import webview
 
+    class DesktopApi:
+        def close(self) -> bool:
+            if window is not None:
+                window.destroy()
+            return True
+
     window = webview.create_window(
         "Holy War",
         url,
@@ -1671,6 +1781,7 @@ def _open_desktop_window(url: str, *, smoke_test: bool = False) -> None:
         background_color="#080b12",
         text_select=False,
         zoomable=False,
+        js_api=DesktopApi(),
     )
     if window is None:
         raise RuntimeError("Impossibile creare la finestra di Holy War.")
@@ -1692,12 +1803,23 @@ def _run() -> None:
         for warning in register_premades_from_json(args.premades_json):
             print(f"Avviso deck: {warning}")
     static_dir = bundled_project_root() / "web_concept"
-    session = WebGameSession(Path(args.cards_json), seed=args.seed)
+    session = WebGameSession(Path(args.cards_json), seed=args.seed, autoload=False)
     multiplayer = MultiplayerService(session)
+    settings_path = appdata_dir() / "options.json"
+    user_settings = {"username": "Pellegrino", "default_deck": DEFAULT_PLAYER_DECK}
+    if settings_path.is_file():
+        try:
+            loaded_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_settings, dict):
+                user_settings.update({key: str(value) for key, value in loaded_settings.items() if key in user_settings})
+        except (OSError, ValueError, TypeError):
+            pass
 
     def handler(*handler_args: Any, **handler_kwargs: Any) -> HolyWarRequestHandler:
         HolyWarRequestHandler.session = session
         HolyWarRequestHandler.multiplayer = multiplayer
+        HolyWarRequestHandler.user_settings = user_settings
+        HolyWarRequestHandler.user_settings_path = settings_path
         return HolyWarRequestHandler(*handler_args, directory=str(static_dir), **handler_kwargs)
 
     server: ThreadingHTTPServer | None

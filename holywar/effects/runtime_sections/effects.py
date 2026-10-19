@@ -96,6 +96,25 @@ class RuntimeEffectsMixin(
         targets: list[str],
         effect: EffectSpec,
     ) -> None:
+        if engine.state.phase == "preparation":
+            # Only the player currently arranging their field can resolve
+            # automatic effects.  Effects aimed at, or comparing against, the
+            # hidden opponent are intentionally dormant during setup.
+            if owner_idx != engine.state.active_player:
+                return
+            opponent_scopes = {"opponent", "enemy", "other"}
+            if _norm(effect.target_player or "me") in opponent_scopes:
+                return
+            if _norm(effect.compare_target_player or "me") in opponent_scopes:
+                return
+            if _norm(effect.owner or "me") in opponent_scopes:
+                return
+            targets = [
+                target
+                for target in targets
+                if target not in engine.state.instances
+                or int(engine.state.instances[target].owner) == int(owner_idx)
+            ]
         action = _norm(effect.action)
         action = EFFECT_ACTION_ALIASES.get(action, action)
         if action == "return_to_hand_once_per_turn":

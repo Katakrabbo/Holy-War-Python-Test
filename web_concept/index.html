@@ -10,7 +10,7 @@
 </head>
 
 <body>
-  <main class="app-shell">
+  <main class="app-shell" hidden>
     <header class="topbar">
       <div class="brand-block">
         <p class="eyebrow">GIOCO DI CARTE</p>
@@ -65,6 +65,10 @@
       </aside>
 
       <section class="board" aria-label="Campo di gioco">
+        <div class="preparation-fog" id="preparation-fog" hidden aria-live="polite">
+          <strong>CAMPO AVVERSARIO NASCOSTO</strong>
+          <span>Verr&agrave; rivelato dopo il lancio della moneta.</span>
+        </div>
         <div class="territory territory-enemy">
           <div class="direct-attack-zone" data-direct-attack="direct" aria-label="Attacca direttamente l'avversario">
             <strong>Attacco diretto</strong>
@@ -223,16 +227,110 @@
     <button type="button" id="inspect-card-button" role="menuitem">Mostra dettagli</button>
   </div>
 
+  <dialog id="main-menu-dialog" class="main-menu-dialog">
+    <p class="eyebrow">GIOCO DI CARTE</p>
+    <h2>HOLY WAR</h2>
+    <div class="main-menu-actions">
+      <button class="button button-primary" id="menu-single-player" type="button">Giocatore singolo</button>
+      <button class="button button-quiet" id="menu-local-multiplayer" type="button">Multiplayer (Locale)</button>
+      <button class="button button-quiet" id="menu-online-multiplayer" type="button">Multiplayer (Online)</button>
+      <button class="button button-quiet" id="menu-deck-editor" type="button">Deck Editor</button>
+      <button class="button button-quiet" id="menu-test-field" type="button">Test Field</button>
+      <button class="button button-quiet" id="menu-options" type="button">Opzioni</button>
+      <button class="button button-danger" id="menu-close" type="button">Chiudi</button>
+    </div>
+  </dialog>
+
+  <dialog id="online-browser-dialog" class="online-browser-dialog">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">MULTIPLAYER ONLINE</p><h2>Partite disponibili</h2></div>
+      <button class="icon-button" id="online-browser-back" type="button" aria-label="Indietro">&times;</button>
+    </div>
+    <div class="browser-toolbar">
+      <button class="button button-primary" id="open-host-room" type="button">Hosta partita</button>
+      <button class="button button-quiet" id="refresh-rooms" type="button">Aggiorna</button>
+    </div>
+    <p class="online-status" id="browser-status">Ricerca delle stanze in corso...</p>
+    <div class="room-list" id="room-list"></div>
+  </dialog>
+
+  <dialog id="host-room-dialog">
+    <form id="host-room-form">
+      <p class="eyebrow">NUOVA STANZA</p><h2>Hosta partita</h2>
+      <label class="setup-field"><span>Nome stanza</span><input id="room-name" maxlength="40" required></label>
+      <label class="setup-field"><span>Password opzionale</span><input id="room-password" maxlength="64" type="password"></label>
+      <div class="confirm-actions">
+        <button class="button button-quiet" id="cancel-host-room" type="button">Annulla</button>
+        <button class="button button-primary" type="submit">Crea stanza</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="join-password-dialog">
+    <form id="join-password-form">
+      <h2>Stanza protetta</h2>
+      <label class="setup-field"><span>Password</span><input id="join-room-password" type="password" maxlength="64" required></label>
+      <div class="confirm-actions"><button class="button button-quiet" type="button" id="cancel-join-room">Annulla</button><button class="button button-primary" type="submit">Entra</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="online-room-dialog" class="online-room-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">SALA D'ATTESA</p><h2 id="online-room-title">Stanza</h2></div></div>
+    <p class="online-status" id="room-status">In attesa dei partecipanti...</p>
+    <div class="role-grid">
+      <button class="role-slot" data-room-role="player1" type="button"><strong>Giocatore 1</strong><span id="role-player1">Libero</span></button>
+      <button class="role-slot" data-room-role="player2" type="button"><strong>Giocatore 2</strong><span id="role-player2">Libero</span></button>
+      <button class="role-slot spectator-slot" data-room-role="spectator" type="button"><strong>Spectate</strong><span id="role-spectator">0 / 5</span></button>
+    </div>
+    <section id="online-deck-choice" hidden>
+      <label class="setup-field"><span>Il tuo mazzo (scelta privata)</span><select id="online-player-deck"></select></label>
+      <button class="button button-primary" id="confirm-online-deck" type="button">Conferma mazzo</button>
+    </section>
+    <div class="room-actions">
+      <button class="button button-quiet" id="leave-room" type="button">Esci dalla stanza</button>
+      <button class="button button-primary" id="proceed-room" type="button" hidden>Procedi</button>
+      <button class="button button-primary" id="start-online-match" type="button" hidden>Avvia partita</button>
+    </div>
+  </dialog>
+
+  <dialog id="options-dialog">
+    <form id="options-form">
+      <p class="eyebrow">IMPOSTAZIONI</p><h2>Opzioni</h2>
+      <label class="setup-field"><span>Nome utente</span><input id="option-username" maxlength="28" required></label>
+      <label class="setup-field"><span>Deck predefinito</span><select id="option-default-deck"></select></label>
+      <div class="confirm-actions"><button class="button button-quiet" id="cancel-options" type="button">Annulla</button><button class="button button-primary" type="submit">Salva</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="close-game-dialog">
+    <h2>Chiudere Holy War?</h2><p>Vuoi davvero uscire dal gioco?</p>
+    <div class="confirm-actions"><button class="button button-quiet" data-close-dialog type="button">No</button><button class="button button-danger" id="confirm-close-game" type="button">S&igrave;</button></div>
+  </dialog>
+
+  <dialog id="rematch-dialog">
+    <h2>Giocare un rematch?</h2><p>La nuova partita user&agrave; gli stessi mazzi.</p>
+    <div class="confirm-actions"><button class="button button-quiet" id="decline-rematch" type="button">No</button><button class="button button-primary" id="accept-rematch" type="button">S&igrave;</button></div>
+  </dialog>
+
+  <dialog id="coin-toss-dialog" class="coin-toss-dialog">
+    <p class="eyebrow">INIZIO PARTITA</p>
+    <h2>Lancio della moneta</h2>
+    <p id="coin-toss-message">Il giocatore iniziale &egrave; stato scelto.</p>
+    <p class="online-status" id="coin-toss-wait" hidden>Conferma registrata. In attesa dell'altro giocatore...</p>
+    <button class="button button-primary" id="confirm-coin-toss" type="button">OK</button>
+  </dialog>
+
   <dialog id="setup-dialog" class="setup-dialog">
     <form id="setup-form">
       <p class="eyebrow">PREPARA IL DUELLO</p>
       <div class="dialog-heading">
         <h2>Nuova partita</h2>
+        <button class="icon-button" id="setup-back-menu" type="button" aria-label="Indietro">&times;</button>
       </div>
       <p class="setup-intro">Scegli i due contendenti e i loro mazzi. In modalit&agrave; locale il campo ruota
         automaticamente verso il giocatore di turno.</p>
 
-      <label class="setup-field setup-mode">
+      <label class="setup-field setup-mode" hidden>
         <span>Modalit&agrave;</span>
         <select id="game-mode" name="mode">
           <option value="ai">Giocatore contro CPU</option>
@@ -242,13 +340,13 @@
       </label>
 
       <div class="setup-players">
-        <fieldset id="opponent-setup">
+        <fieldset>
           <legend>Giocatore 1</legend>
           <label class="setup-field"><span>Nome</span><input id="player-name" name="player_name" value="Pellegrino"
               maxlength="28"></label>
           <label class="setup-field"><span>Mazzo</span><select id="player-deck" name="player_deck"></select></label>
         </fieldset>
-        <fieldset>
+        <fieldset id="opponent-setup">
           <legend>Avversario</legend>
           <label class="setup-field"><span id="opponent-name-label">Nome CPU</span><input id="opponent-name"
               name="opponent_name" value="Custode" maxlength="28"></label>

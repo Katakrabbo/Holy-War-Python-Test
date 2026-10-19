@@ -47,6 +47,10 @@ button:focus-visible {
   flex-direction: column;
 }
 
+.app-shell[hidden] {
+  display: none;
+}
+
 .topbar {
   min-height: 62px;
   display: grid;
@@ -250,6 +254,38 @@ button:focus-visible {
 .board {
   grid-column: 2 / 3;
   grid-row: 1 / 4;
+}
+
+.preparation-fog {
+  position: absolute;
+  z-index: 18;
+  inset: 0 0 50% 0;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: #e8edf0;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(42, 51, 57, .96), rgba(4, 7, 9, .995) 68%),
+    repeating-linear-gradient(135deg, #11181d 0 16px, #0b1014 16px 32px);
+  border-bottom: 2px solid #71808a;
+  text-align: center;
+  pointer-events: all;
+}
+
+.preparation-fog[hidden] {
+  display: none;
+}
+
+.preparation-fog strong {
+  color: var(--gold-2);
+  font: 700 1.05rem Georgia, serif;
+  letter-spacing: .12em;
+}
+
+.preparation-fog span {
+  color: var(--muted);
+  font-size: .78rem;
 }
 
 .inspector {
@@ -1506,6 +1542,100 @@ dialog li {
   width: min(760px, calc(100vw - 32px));
   padding: 26px;
 }
+
+.main-menu-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 36px;
+  text-align: center;
+}
+
+.coin-toss-dialog {
+  text-align: center;
+}
+
+.coin-toss-dialog h2 {
+  color: var(--gold-2);
+  font-family: Georgia, serif;
+}
+
+.coin-toss-dialog .button {
+  min-width: 140px;
+  margin-top: 12px;
+}
+
+.main-menu-dialog h2 {
+  margin: 4px 0 24px;
+  color: var(--gold-2);
+  font: 700 2.6rem Georgia, serif;
+  letter-spacing: .12em;
+}
+
+.main-menu-actions {
+  display: grid;
+  gap: 9px;
+}
+
+.main-menu-actions .button {
+  min-height: 44px;
+}
+
+.online-browser-dialog, .online-room-dialog {
+  width: min(860px, calc(100vw - 32px));
+  min-height: 520px;
+}
+
+.browser-toolbar, .room-actions {
+  display: flex;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.room-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.room-entry {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 1.4fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #3c4a52;
+  border-radius: 8px;
+  background: rgba(7, 12, 15, .38);
+}
+
+.room-entry small { color: var(--muted); }
+.room-entry .room-phase { color: var(--gold-2); text-transform: uppercase; font-size: .68rem; }
+.empty-room-list { padding: 42px; color: var(--muted); text-align: center; }
+
+.role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.role-slot {
+  display: grid;
+  gap: 7px;
+  min-height: 90px;
+  padding: 16px;
+  border: 1px solid #46565f;
+  border-radius: 9px;
+  color: var(--text);
+  background: #10171b;
+  cursor: pointer;
+}
+
+.role-slot:hover, .role-slot.selected { border-color: var(--green); background: rgba(114, 217, 154, .1); }
+.role-slot span { color: var(--muted); }
+.spectator-slot { grid-column: 1 / -1; }
+#online-deck-choice { padding: 15px; border: 1px solid #3c4a52; border-radius: 9px; }
+#online-deck-choice .button { margin-top: 10px; }
 
 .setup-dialog h2 {
   margin: 5px 0 0;

@@ -5,7 +5,8 @@ from unittest.mock import patch
 import pytest
 
 from holywar.web import WebGameSession
-from holywar.effects.runtime import runtime_cards
+from holywar.effects.runtime import EffectSpec, TargetSpec, runtime_cards
+from holywar.scripting_api import RuleEventContext
 from holywar.multiplayer.protocol import AuthoritativeMatch, MatchCommand, ProtocolError
 from holywar.multiplayer.service import MultiplayerService
 
@@ -30,6 +31,13 @@ def test_web_config_identifies_the_packaged_application() -> None:
     assert session.config()["application"] == "holywar"
 
 
+def test_application_session_can_start_without_preloading_a_match() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11, autoload=False)
+
+    assert session.engine is None
+    assert session.snapshot()["game"] is None
+
+
 def test_online_snapshots_keep_each_players_hand_private() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
     session.new_game({"mode": "online"})
@@ -43,6 +51,45 @@ def test_online_snapshots_keep_each_players_hand_private() -> None:
     assert guest[1]["hand"][0]["hidden"] is True
 
 
+def test_online_spectator_sees_both_hands_but_cannot_act() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+
+    snapshot = session.snapshot(viewer_idx=0, spectator=True)["game"]
+
+    assert snapshot["spectator"] is True
+    assert snapshot["can_act"] is False
+    assert snapshot["players"][0]["hand"][0].get("hidden") is not True
+    assert snapshot["players"][1]["hand"][0].get("hidden") is not True
+
+
+def test_online_preparation_hides_opponent_field_until_both_confirm_coin_toss() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    opponent = session.engine.state.players[1]
+    hidden_uid = opponent.hand.pop()
+    opponent.attack[0] = hidden_uid
+
+    preparing = session.snapshot(viewer_idx=0)["game"]
+    assert preparing["players"][1]["field_hidden"] is True
+    assert preparing["players"][1]["attack"] == [None, None, None]
+    assert hidden_uid not in str(preparing)
+
+    session.action({"type": "end_turn"}, network_actor_idx=0)
+    tossed = session.action({"type": "end_turn"}, network_actor_idx=1)
+    assert tossed["game"]["coin_toss"]["pending"] is True
+    assert tossed["game"]["players"][1]["field_hidden"] is True
+
+    waiting = session.action({"type": "confirm_coin_toss"}, network_actor_idx=0)
+    assert waiting["game"]["coin_toss"]["pending"] is True
+    assert waiting["game"]["players"][1]["field_hidden"] is True
+
+    revealed = session.action({"type": "confirm_coin_toss"}, network_actor_idx=1)
+    assert revealed["game"]["coin_toss"]["pending"] is False
+    assert revealed["game"]["players"][0]["field_hidden"] is False
+
+
 def test_online_action_rejects_player_without_priority() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
     session.new_game({"mode": "online"})
@@ -53,6 +100,82 @@ def test_online_action_rejects_player_without_priority() -> None:
 
     assert response["ok"] is False
     assert "avversario" in response["message"].lower()
+
+
+def test_online_host_uses_assigned_player_two_during_preparation() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    session.engine.state.active_player = 1
+    service = MultiplayerService(session)
+    service.user_id = service.owner_id = "host"
+    service.lobby_id = "lobby"
+    service.role = "host"
+    service.player_role = "player2"
+    service.phase = "playing"
+    service.members = ["host"]
+
+    result = service.request("action", {"type": "end_turn"})
+
+    assert result["ok"] is True
+    assert result["game"]["viewer_index"] == 1
+
+
+def test_online_host_tracks_hello_sender_before_broadcasting_room() -> None:
+    service = MultiplayerService(WebGameSession(Path("holywar/data/cards.json"), seed=11))
+    service.user_id = service.owner_id = "host"
+    service.lobby_id = "lobby"
+    service.role = "host"
+    service.phase = "waiting"
+    service.members = ["host"]
+    service.profiles = {"host": {"name": "Host", "role": None, "deck": "", "ready": False}}
+
+    with patch.object(service, "_broadcast_room") as broadcast:
+        service._handle_message("guest", {"kind": "hello", "profile": {"name": "Guest"}, "password": ""})
+
+    assert service.members == ["host", "guest"]
+    assert service.profiles["guest"]["name"] == "Guest"
+    broadcast.assert_called_once()
+
+
+def test_online_room_rejects_duplicate_participant_names() -> None:
+    service = MultiplayerService(WebGameSession(Path("holywar/data/cards.json"), seed=11))
+    service.user_id = service.owner_id = "host"
+    service.lobby_id = "lobby"
+    service.role = "host"
+    service.phase = "waiting"
+    service.members = ["host"]
+    service.profiles = {"host": {"name": "Pellegrino", "role": None, "deck": "", "ready": False}}
+
+    with patch.object(service, "_send_message") as send, patch.object(service, "_broadcast_room") as broadcast:
+        service._handle_message(
+            "guest",
+            {"kind": "hello", "profile": {"name": "  PELLEGRINO  "}, "password": ""},
+        )
+
+    assert "guest" not in service.members
+    assert "guest" not in service.profiles
+    send.assert_called_once_with({
+        "kind": "join_rejected",
+        "message": "Due partecipanti con lo stesso nome non possono partecipare alla stessa stanza.",
+    }, "guest")
+    broadcast.assert_not_called()
+
+
+def test_online_room_requires_every_participant_to_choose_role() -> None:
+    service = MultiplayerService(WebGameSession(Path("holywar/data/cards.json"), seed=11))
+    service.user_id = service.owner_id = "host"
+    service.lobby_id = "lobby"
+    service.role = "host"
+    service.phase = "waiting"
+    service.profiles = {
+        "host": {"name": "Host", "role": "player1", "deck": "", "ready": False},
+        "guest": {"name": "Guest", "role": "player2", "deck": "", "ready": False},
+        "third": {"name": "Third", "role": None, "deck": "", "ready": False},
+    }
+
+    with pytest.raises(ValueError, match="Ogni partecipante"):
+        service._apply_room_action("host", "proceed", {})
 
 
 def test_online_options_use_the_network_players_private_hand() -> None:
@@ -580,7 +703,10 @@ def test_ai_turn_is_exposed_one_move_at_a_time() -> None:
         choose.assert_called_once()
         pass_calls += 1
     assert completed["game"]["ai_pending"] is False
-    assert completed["game"]["actual_active_player"] == 0
+    assert completed["game"]["coin_toss"]["pending"] is True
+
+    started = session.action({"type": "confirm_coin_toss"})
+    assert started["game"]["coin_toss"]["pending"] is False
 
 
 def test_manual_activation_exposes_runtime_zone_candidates() -> None:
@@ -677,6 +803,7 @@ def test_runtime_reveal_choice_is_exposed_and_resumed() -> None:
 def test_chain_priority_is_paced_between_ai_and_player() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
     assert session.engine is not None
+    session.engine.state.phase = "active"
     opponent = session.engine.state.players[1]
     quick_uid = next(
         uid for uid, instance in session.engine.state.instances.items()
@@ -686,11 +813,24 @@ def test_chain_priority_is_paced_between_ai_and_player() -> None:
         if quick_uid in zone:
             zone.remove(quick_uid)
     opponent.hand.append(quick_uid)
+    player = session.engine.state.players[0]
+    player_quick = next(
+        uid for uid, instance in session.engine.state.instances.items()
+        if instance.owner == 0 and instance.definition.card_type.lower() in {"benedizione", "maledizione"}
+    )
+    for zone in (player.deck, player.white_deck, player.graveyard, player.excommunicated, player.hand):
+        if player_quick in zone:
+            zone.remove(player_quick)
+    player.hand.append(player_quick)
     session._start_chain(0)
 
     waiting = session.snapshot()
     assert waiting["game"]["chain"]["active"] is True
-    assert waiting["game"]["ai_pending"] is True
+    assert waiting["game"]["chain"]["priority"] == 0
+    assert waiting["game"]["ai_pending"] is False
+
+    passed_first_priority = session.action({"type": "chain_pass"})
+    assert passed_first_priority["game"]["ai_pending"] is True
 
     with patch.object(session.engine, "quick_play", return_value=SimpleNamespace(ok=True, message="Risposta rapida.")):
         answered = session.ai_step()
@@ -707,6 +847,7 @@ def test_chain_priority_is_paced_between_ai_and_player() -> None:
 def test_chain_can_be_disabled_and_reenabled_from_topbar_setting() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
     assert session.engine is not None
+    session.engine.state.phase = "active"
     opponent = session.engine.state.players[1]
     quick_uid = next(
         uid for uid, instance in session.engine.state.instances.items()
@@ -720,14 +861,121 @@ def test_chain_can_be_disabled_and_reenabled_from_topbar_setting() -> None:
     disabled = session.action({"type": "set_chain", "enabled": False})
     assert disabled["game"]["chain"]["enabled"] is False
     session._start_chain(0)
+    assert session.chain_active is True
+    assert session.chain_priority_idx == 1
+
+    session.chain_active = False
+    session.chain_participants = []
+    session.action({"type": "set_chain", "enabled": False}, network_actor_idx=1)
+    session._start_chain(0)
     assert session.chain_active is False
 
-    # The setting remains available even while the CPU owns the normal turn.
     session.engine.state.active_player = 1
-    enabled = session.action({"type": "set_chain", "enabled": True})
-    assert enabled["game"]["chain"]["enabled"] is True
+    session._start_chain(1)
+    assert session.chain_active is False
+
+    session.action({"type": "set_chain", "enabled": True}, network_actor_idx=1)
     session._start_chain(0)
     assert session.chain_active is True
+    assert session.chain_priority_idx == 1
+
+
+def test_chain_never_opens_during_preparation() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    assert session.engine is not None
+    assert session.engine.state.phase == "preparation"
+    for player_idx in (0, 1):
+        player = session.engine.state.players[player_idx]
+        quick_uid = next(
+            uid for uid, instance in session.engine.state.instances.items()
+            if instance.owner == player_idx
+            and instance.definition.card_type.lower() in {"benedizione", "maledizione"}
+        )
+        for zone in (player.deck, player.white_deck, player.graveyard, player.excommunicated, player.hand):
+            if quick_uid in zone:
+                zone.remove(quick_uid)
+        player.hand.append(quick_uid)
+
+    session._start_chain(0)
+    assert session.chain_active is False
+
+
+def test_preparation_resolves_own_automatic_effects_but_isolates_opponent_side() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    assert session.engine is not None
+    engine = session.engine
+    engine.state.active_player = 0
+    assert engine.state.phase == "preparation"
+
+    own_source = next(uid for uid, inst in engine.state.instances.items() if inst.owner == 0)
+    own_target = next(uid for uid, inst in engine.state.instances.items() if inst.owner == 0 and uid != own_source)
+    enemy_target = next(uid for uid, inst in engine.state.instances.items() if inst.owner == 1)
+    own_before = engine.state.instances[own_target].current_faith or 0
+    enemy_before = engine.state.instances[enemy_target].current_faith or 0
+
+    # Mandatory effects on the preparing player's own side still resolve.
+    runtime_cards._apply_effect(  # noqa: SLF001
+        engine,
+        0,
+        own_source,
+        [own_target],
+        EffectSpec(action="increase_faith", amount=2),
+    )
+    assert engine.state.instances[own_target].current_faith == own_before + 2
+
+    # The same automatic resolution cannot touch a hidden opposing card or
+    # apply an opponent-scoped player effect during preparation.
+    runtime_cards._apply_effect(  # noqa: SLF001
+        engine,
+        0,
+        own_source,
+        [enemy_target],
+        EffectSpec(action="increase_faith", amount=2),
+    )
+    runtime_cards._apply_effect(  # noqa: SLF001
+        engine,
+        0,
+        own_source,
+        [],
+        EffectSpec(action="inflict_sin", amount=3, target_player="opponent"),
+    )
+    assert engine.state.instances[enemy_target].current_faith == enemy_before
+    assert engine.state.players[1].sin == 0
+
+    candidates = runtime_cards._collect_selectable_targets_for_manual_target(  # noqa: SLF001
+        engine,
+        0,
+        TargetSpec(type="cards_controlled_by_owner", owner="both", zone="field"),
+    )
+    assert all(engine.state.instances[uid].owner == 0 for uid in candidates)
+    assert runtime_cards._collect_selectable_targets_for_manual_target(  # noqa: SLF001
+        engine,
+        0,
+        TargetSpec(type="cards_controlled_by_owner", owner="opponent", zone="field"),
+    ) == []
+    assert runtime_cards._eval_condition_node(  # noqa: SLF001
+        RuleEventContext(engine=engine, player_idx=0, event="on_enter", payload={}),
+        0,
+        {"my_saints_lt_opponent": True},
+    ) is False
+
+
+def test_opponent_permanents_do_not_trigger_during_hidden_preparation() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"opponent_deck": "phdk_b1_volere"})
+    assert session.engine is not None
+    engine = session.engine
+    engine.state.active_player = 0
+    opponent_source = next(
+        uid for uid, inst in engine.state.instances.items()
+        if inst.owner == 1 and inst.definition.name == "Volere di Ph"
+    )
+    drawn_uid = engine.state.players[0].hand[0]
+    runtime_cards.on_enter_bind_triggers(engine, 1, opponent_source)
+
+    engine._emit_event("on_card_drawn", 0, card=drawn_uid, player=0)
+
+    assert engine.state.players[0].sin == 0
 
 
 def test_cataclisma_ciclico_forces_owner_target_choice_even_with_chain_disabled() -> None:

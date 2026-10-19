@@ -17,6 +17,11 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
 {
     private const string SocketName = "HOLYWAR_V1";
     private const string BucketId = "holywar-turnbased-v1";
+    private const string GameAttribute = "HOLYWAR_GAME";
+    private const string RoomNameAttribute = "ROOM_NAME";
+    private const string PasswordAttribute = "HAS_PASSWORD";
+    private const string PhaseAttribute = "ROOM_PHASE";
+    private const string PlayerNamesAttribute = "PLAYER_NAMES";
 
     private readonly string? _settingsPath;
     private readonly ConcurrentDictionary<string, byte> _members = new(StringComparer.Ordinal);
@@ -64,7 +69,11 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
             case "login":
                 return await LoginWithDeviceIdAsync(payload, cancellationToken);
             case "create_lobby":
-                return await CreateLobbyAsync(cancellationToken);
+                return await CreateLobbyAsync(payload, cancellationToken);
+            case "find_lobbies":
+                return await FindLobbiesAsync(cancellationToken);
+            case "update_lobby":
+                return await UpdateLobbyAttributesAsync(payload, cancellationToken);
             case "join_lobby":
                 return await JoinLobbyAsync(ReadRequiredString(payload, "lobbyId"), cancellationToken);
             case "leave_lobby":
@@ -208,7 +217,7 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
         return new { userId = _localUserId.ToString(), displayName };
     }
 
-    private async Task<object> CreateLobbyAsync(CancellationToken cancellationToken)
+    private async Task<object> CreateLobbyAsync(JsonElement payload, CancellationToken cancellationToken)
     {
         EnsureLoggedIn();
         EnsureNoLobby();
@@ -216,8 +225,8 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
         var options = new CreateLobbyOptions
         {
             LocalUserId = _localUserId!,
-            MaxLobbyMembers = 2,
-            PermissionLevel = LobbyPermissionLevel.Inviteonly,
+            MaxLobbyMembers = 7,
+            PermissionLevel = LobbyPermissionLevel.Publicadvertised,
             PresenceEnabled = false,
             AllowInvites = false,
             BucketId = BucketId,
@@ -234,8 +243,171 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
         _lobbyId = result.LobbyId ?? throw new InvalidOperationException("EOS non ha restituito il Lobby ID.");
         _ownerId = _localUserId!.ToString();
         await InvokeOnSdkThreadAsync(RefreshLobbyMembers, cancellationToken);
+        using var attributesDocument = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            roomName = ReadOptionalString(payload, "roomName") ?? "Stanza Holy War",
+            passwordProtected = ReadOptionalBool(payload, "passwordProtected"),
+            phase = "waiting",
+            playerNames = ReadOptionalString(payload, "playerNames") ?? "",
+        }));
+        await UpdateLobbyAttributesAsync(attributesDocument.RootElement, cancellationToken);
         await RaiseLobbyUpdatedAsync();
-        return new { lobbyId = _lobbyId, ownerId = _ownerId, maxMembers = 2 };
+        return new { lobbyId = _lobbyId, ownerId = _ownerId, maxMembers = 7 };
+    }
+
+    private async Task<object> UpdateLobbyAttributesAsync(JsonElement payload, CancellationToken cancellationToken)
+    {
+        EnsureInLobby();
+        if (_ownerId != _localUserId!.ToString())
+        {
+            throw new InvalidOperationException("Solo l'host puo aggiornare i dati della lobby.");
+        }
+
+        LobbyModification? modification = null;
+        await InvokeOnSdkThreadAsync(() =>
+        {
+            var modificationOptions = new UpdateLobbyModificationOptions
+            {
+                LobbyId = _lobbyId!,
+                LocalUserId = _localUserId!,
+            };
+            var modificationResult = _lobby!.UpdateLobbyModification(ref modificationOptions, out modification);
+            if (modificationResult != Result.Success || modification is null)
+            {
+                throw EosFailure("preparazione aggiornamento lobby", modificationResult);
+            }
+
+            AddPublicAttribute(modification, GameAttribute, "holywar-v1");
+            AddPublicAttribute(modification, RoomNameAttribute, ReadOptionalString(payload, "roomName") ?? "Stanza Holy War");
+            AddPublicAttribute(modification, PasswordAttribute, ReadOptionalBool(payload, "passwordProtected"));
+            AddPublicAttribute(modification, PhaseAttribute, ReadOptionalString(payload, "phase") ?? "waiting");
+            AddPublicAttribute(modification, PlayerNamesAttribute, ReadOptionalString(payload, "playerNames") ?? "");
+        }, cancellationToken);
+
+        try
+        {
+            var completion = CompletionSource<Result>();
+            await InvokeOnSdkThreadAsync(() =>
+            {
+                var updateOptions = new UpdateLobbyOptions { LobbyModificationHandle = modification! };
+                _lobby!.UpdateLobby(ref updateOptions, completion, (ref UpdateLobbyCallbackInfo info) =>
+                    completion.TrySetResult(info.ResultCode));
+            }, cancellationToken);
+            var result = await completion.Task.WaitAsync(cancellationToken);
+            if (result != Result.Success) throw EosFailure("aggiornamento lobby", result);
+        }
+        finally
+        {
+            await InvokeOnSdkThreadAsync(() => modification?.Release(), cancellationToken);
+        }
+        return new { updated = true };
+    }
+
+    private async Task<object> FindLobbiesAsync(CancellationToken cancellationToken)
+    {
+        EnsureLoggedIn();
+        LobbySearch? search = null;
+        await InvokeOnSdkThreadAsync(() =>
+        {
+            var createOptions = new CreateLobbySearchOptions { MaxResults = 50 };
+            var createResult = _lobby!.CreateLobbySearch(ref createOptions, out search);
+            if (createResult != Result.Success || search is null) throw EosFailure("creazione ricerca lobby", createResult);
+            var parameterOptions = new LobbySearchSetParameterOptions
+            {
+                Parameter = new AttributeData { Key = GameAttribute, Value = "holywar-v1" },
+                ComparisonOp = ComparisonOp.Equal,
+            };
+            var parameterResult = search.SetParameter(ref parameterOptions);
+            if (parameterResult != Result.Success) throw EosFailure("filtro ricerca lobby", parameterResult);
+        }, cancellationToken);
+
+        try
+        {
+            var completion = CompletionSource<Result>();
+            await InvokeOnSdkThreadAsync(() =>
+            {
+                var findOptions = new LobbySearchFindOptions { LocalUserId = _localUserId! };
+                search!.Find(ref findOptions, completion, (ref LobbySearchFindCallbackInfo info) =>
+                    completion.TrySetResult(info.ResultCode));
+            }, cancellationToken);
+            var findResult = await completion.Task.WaitAsync(cancellationToken);
+            if (findResult != Result.Success) throw EosFailure("ricerca lobby", findResult);
+
+            return await InvokeOnSdkThreadAsync(() =>
+            {
+                var rooms = new List<object>();
+                var countOptions = new LobbySearchGetSearchResultCountOptions();
+                var count = search!.GetSearchResultCount(ref countOptions);
+                for (uint index = 0; index < count; index++)
+                {
+                    var copyOptions = new LobbySearchCopySearchResultByIndexOptions { LobbyIndex = index };
+                    if (search.CopySearchResultByIndex(ref copyOptions, out var details) != Result.Success || details is null) continue;
+                    try
+                    {
+                        var infoOptions = new LobbyDetailsCopyInfoOptions();
+                        if (details.CopyInfo(ref infoOptions, out var info) != Result.Success || !info.HasValue) continue;
+                        rooms.Add(new
+                        {
+                            lobbyId = info.Value.LobbyId.ToString(),
+                            ownerId = info.Value.LobbyOwnerUserId?.ToString(),
+                            roomName = ReadLobbyString(details, RoomNameAttribute) ?? "Stanza Holy War",
+                            passwordProtected = ReadLobbyBool(details, PasswordAttribute),
+                            phase = ReadLobbyString(details, PhaseAttribute) ?? "waiting",
+                            playerNames = (ReadLobbyString(details, PlayerNamesAttribute) ?? "")
+                                .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                            members = checked((int)(info.Value.MaxMembers - info.Value.AvailableSlots)),
+                            maxMembers = info.Value.MaxMembers,
+                        });
+                    }
+                    finally
+                    {
+                        details.Release();
+                    }
+                }
+                return (object)new { rooms };
+            }, cancellationToken);
+        }
+        finally
+        {
+            await InvokeOnSdkThreadAsync(() => search?.Release(), cancellationToken);
+        }
+    }
+
+    private static void AddPublicAttribute(LobbyModification modification, string key, string value)
+    {
+        var options = new LobbyModificationAddAttributeOptions
+        {
+            Attribute = new AttributeData { Key = key, Value = value },
+            Visibility = LobbyAttributeVisibility.Public,
+        };
+        var result = modification.AddAttribute(ref options);
+        if (result != Result.Success) throw EosFailure($"attributo lobby {key}", result);
+    }
+
+    private static void AddPublicAttribute(LobbyModification modification, string key, bool value)
+    {
+        var options = new LobbyModificationAddAttributeOptions
+        {
+            Attribute = new AttributeData { Key = key, Value = value },
+            Visibility = LobbyAttributeVisibility.Public,
+        };
+        var result = modification.AddAttribute(ref options);
+        if (result != Result.Success) throw EosFailure($"attributo lobby {key}", result);
+    }
+
+    private static string? ReadLobbyString(LobbyDetails details, string key)
+    {
+        var options = new LobbyDetailsCopyAttributeByKeyOptions { AttrKey = key };
+        return details.CopyAttributeByKey(ref options, out var attribute) == Result.Success
+            ? attribute?.Data?.Value.AsUtf8.ToString()
+            : null;
+    }
+
+    private static bool ReadLobbyBool(LobbyDetails details, string key)
+    {
+        var options = new LobbyDetailsCopyAttributeByKeyOptions { AttrKey = key };
+        return details.CopyAttributeByKey(ref options, out var attribute) == Result.Success
+            && attribute?.Data?.Value.AsBool == true;
     }
 
     private async Task<object> JoinLobbyAsync(string lobbyId, CancellationToken cancellationToken)
@@ -575,6 +747,12 @@ internal sealed class EosMultiplayerProvider : IMultiplayerProvider
         var result = value.GetString()?.Trim();
         return string.IsNullOrEmpty(result) ? null : result;
     }
+
+    private static bool ReadOptionalBool(JsonElement payload, string name) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty(name, out var value)
+        && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+        && value.GetBoolean();
 
     private sealed record DeviceLoginResult(Result Result, ProductUserId? UserId, ContinuanceToken? ContinuanceToken);
     private sealed record UserCreationResult(Result Result, ProductUserId? UserId);

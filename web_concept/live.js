@@ -9,6 +9,8 @@ const ui = {
   aiTimer: null,
   onlineTimer: null,
   onlineBusy: false,
+  browserTimer: null,
+  browserBusy: false,
   onlineStateKey: null,
   decisionId: null,
   runtimeSelectionOrder: [],
@@ -20,11 +22,22 @@ const ui = {
   testDraft: null,
   testStep: 0,
   testPicker: null,
-  testStarted: false
+  testStarted: false,
+  config: null,
+  options: null,
+  joinTarget: null
 };
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+
+function showGameScreen() {
+  $(".app-shell").hidden = false;
+}
+
+function hideGameScreen() {
+  $(".app-shell").hidden = true;
+}
 
 async function api(path, payload) {
   const options = payload === undefined
@@ -238,9 +251,12 @@ function renderLog(logs) {
 }
 
 function render(data) {
+  if (!data?.game) return;
+  showGameScreen();
   ui.state = data.game;
   const player = ui.state.players[0];
   const enemy = ui.state.players[1];
+  $("#preparation-fog").hidden = !enemy.field_hidden;
   updateSummary(".own-summary", player);
   updateSummary(".opponent-summary", enemy);
   updateZoneButtons(player, "player");
@@ -279,6 +295,17 @@ function render(data) {
   $("#chain-disable-button").disabled = !chainEnabled;
   if (ui.state.chain?.active) {
     $("#turn-label").textContent = ui.state.chain.priority === 0 ? "Priorità: rispondi o passa" : "Catena avversaria";
+  }
+
+  const coin = ui.state.coin_toss;
+  const coinDialog = $("#coin-toss-dialog");
+  if (coin?.pending) {
+    $("#coin-toss-message").textContent = `${coin.winner_name} ha vinto il lancio della moneta e inizierà per primo.`;
+    $("#coin-toss-wait").hidden = !coin.confirmed;
+    $("#confirm-coin-toss").hidden = coin.confirmed;
+    if (!coinDialog.open) coinDialog.showModal();
+  } else if (coinDialog.open) {
+    coinDialog.close();
   }
 
   if (ui.selectedUid) {
@@ -842,7 +869,7 @@ $("#chain-enable-button").addEventListener("click", () => sendAction({ type: "se
 $("#chain-disable-button").addEventListener("click", () => sendAction({ type: "set_chain", enabled: false }));
 $("#new-game-button").addEventListener("click", () => {
   $("#pause-dialog").close();
-  $("#setup-dialog").showModal();
+  openMainMenu();
 });
 
 function fillDeckSelect(select, decks, selectedId) {
@@ -872,6 +899,8 @@ function refreshDeckSelects(config) {
   const currentOpponent = opponent.value || config.defaults.opponent_deck;
   fillDeckSelect(player, config.decks, config.decks.some(deck => deck.id === currentPlayer) ? currentPlayer : config.defaults.player_deck);
   fillDeckSelect(opponent, config.decks, config.decks.some(deck => deck.id === currentOpponent) ? currentOpponent : config.defaults.opponent_deck);
+  if ($("#online-player-deck")) fillDeckSelect($("#online-player-deck"), config.decks, currentPlayer);
+  if ($("#option-default-deck")) fillDeckSelect($("#option-default-deck"), config.decks, currentPlayer);
 }
 
 function freshDeckDraft() {
@@ -1327,6 +1356,7 @@ function openTestPicker(playerIndex, definition, slot) {
 
 async function openTestGame() {
   $("#setup-dialog").close();
+  $("#main-menu-dialog").close();
   ui.testStarted = false;
   try {
     ui.testEditor = await api("/api/test-editor");
@@ -1337,7 +1367,7 @@ async function openTestGame() {
     $("#test-card-expansion").replaceChildren(new Option("Tutte le espansioni", ""), ...expansions.map(value => new Option(value, value)));
     renderTestWizard();
     $("#test-game-dialog").showModal();
-  } catch (error) { setMessage(error.message, true); $("#setup-dialog").showModal(); }
+  } catch (error) { setMessage(error.message, true); $("#main-menu-dialog").showModal(); }
 }
 
 $("#setup-test-game-button").addEventListener("click", openTestGame);
@@ -1359,6 +1389,7 @@ $("#test-start-button").addEventListener("click", async () => {
       players: ui.testDraft.players
     });
     ui.selectedUid = null;
+    showGameScreen();
     render(data);
     ui.testStarted = true;
     $("#test-game-dialog").close();
@@ -1367,34 +1398,54 @@ $("#test-start-button").addEventListener("click", async () => {
   finally { button.disabled = false; }
 });
 $("#test-game-dialog").addEventListener("close", () => {
-  if (!ui.testStarted && !$("dialog[open]")) $("#setup-dialog").showModal();
+  if (!ui.testStarted && !$("dialog[open]")) $("#main-menu-dialog").showModal();
 });
 
 function updateSetupMode() {
   const mode = $("#game-mode").value;
   const versusAi = mode === "ai";
-  const online = mode === "online";
   $("#opponent-name").disabled = versusAi;
   $("#opponent-name").value = versusAi ? "Custode" : ($("#opponent-name").value === "Custode" ? "Giocatore 2" : $("#opponent-name").value);
   $("#opponent-name-label").textContent = versusAi ? "Nome CPU" : "Nome giocatore 2";
-  $("#opponent-setup").hidden = online;
-  $("#online-setup").hidden = !online;
-  $("#start-game-button").hidden = online;
+  $("#opponent-setup").hidden = false;
+  $("#online-setup").hidden = true;
+  $("#start-game-button").hidden = false;
 }
 
 function onlineProfile() {
   return {
-    player_name: $("#player-name").value,
-    player_deck: $("#player-deck").value
+    player_name: ui.options?.username || $("#player-name").value,
+    player_deck: ui.options?.default_deck || $("#player-deck").value
   };
 }
 
-function showOnlineStatus(status) {
-  $("#online-status").textContent = status.message || "Connessione multiplayer pronta.";
-  $("#leave-online-button").hidden = !status.connected;
-  if (status.lobby_id && status.role === "host") {
-    $("#host-lobby-code").hidden = false;
-    $("#lobby-code-output").value = status.lobby_id;
+function openMainMenu() {
+  clearTimeout(ui.onlineTimer);
+  hideGameScreen();
+  if (!$("dialog[open]")) $("#main-menu-dialog").showModal();
+}
+
+function renderRoom(status) {
+  $("#online-room-title").textContent = status.room_name || "Stanza Holy War";
+  $("#room-status").textContent = status.message || "In attesa...";
+  const participants = status.participants || [];
+  const named = role => participants.find(player => player.role === role);
+  const p1 = named("player1");
+  const p2 = named("player2");
+  const spectators = participants.filter(player => player.role === "spectator");
+  $("#role-player1").textContent = p1?.name || "Libero";
+  $("#role-player2").textContent = p2?.name || "Libero";
+  $("#role-spectator").textContent = `${spectators.length} / 5${spectators.length ? ` · ${spectators.map(p => p.name).join(", ")}` : ""}`;
+  $$('[data-room-role]').forEach(button => button.classList.toggle("selected", button.dataset.roomRole === status.player_role));
+  const choosingDeck = status.phase === "deck_select" && ["player1", "player2"].includes(status.player_role);
+  $("#online-deck-choice").hidden = !choosingDeck;
+  $("#proceed-room").hidden = !(status.is_host && status.phase === "waiting");
+  const playersReady = [p1, p2].every(player => player?.ready);
+  $("#start-online-match").hidden = !(status.is_host && status.phase === "deck_select");
+  $("#start-online-match").disabled = !playersReady;
+  if (!status.playing && status.connected && !$("#online-room-dialog").open) {
+    $("#online-browser-dialog").close();
+    $("#online-room-dialog").showModal();
   }
 }
 
@@ -1407,14 +1458,28 @@ async function pollOnline() {
   ui.onlineBusy = true;
   try {
     const status = await api("/api/multiplayer/status");
-    showOnlineStatus(status);
+    if (status.phase === "rejected" || status.phase === "return_browser") {
+      const message = status.message;
+      await api("/api/multiplayer/leave", {});
+      hideGameScreen();
+      if ($("#online-room-dialog").open) $("#online-room-dialog").close();
+      if (!$("#online-browser-dialog").open) $("#online-browser-dialog").showModal();
+      $("#browser-status").textContent = message;
+      await refreshRooms();
+      return;
+    }
+    renderRoom(status);
     if (status.playing) {
-      if ($("#setup-dialog").open) $("#setup-dialog").close();
+      if ($("#online-room-dialog").open) $("#online-room-dialog").close();
       const data = await api("/api/state");
       const key = JSON.stringify(data.game);
       if (key !== ui.onlineStateKey) {
         ui.onlineStateKey = key;
+        showGameScreen();
         render(data);
+      }
+      if (status.rematch_required && status.rematch_vote == null && !$("#rematch-dialog").open) {
+        $("#rematch-dialog").showModal();
       }
     }
     if (status.connected) ui.onlineTimer = setTimeout(pollOnline, 650);
@@ -1426,46 +1491,93 @@ async function pollOnline() {
   }
 }
 
-async function startOnline(path, extra = {}) {
-  $("#host-online-button").disabled = true;
-  $("#join-online-button").disabled = true;
+async function refreshRooms() {
+  clearTimeout(ui.browserTimer);
+  if (!$("#online-browser-dialog").open || ui.browserBusy) return;
+  ui.browserBusy = true;
+  $("#browser-status").textContent = "Ricerca delle stanze...";
   try {
-    const status = await api(path, { ...onlineProfile(), ...extra });
-    showOnlineStatus(status);
-    pollOnline();
+    const data = await api("/api/multiplayer/find", onlineProfile());
+    const rooms = data.rooms || [];
+    $("#browser-status").textContent = `${rooms.length} ${rooms.length === 1 ? "stanza trovata" : "stanze trovate"}.`;
+    const list = $("#room-list");
+    if (!rooms.length) {
+      list.innerHTML = '<div class="empty-room-list">Nessuna partita aperta. Puoi essere il primo host.</div>';
+      return;
+    }
+    list.replaceChildren(...rooms.map(room => {
+      const row = document.createElement("article");
+      row.className = "room-entry";
+      const players = (room.playerNames || []).join(", ") || "In attesa";
+      row.innerHTML = `<div><strong>${room.passwordProtected ? "🔒 " : ""}${room.roomName}</strong><br><small>${room.members}/${room.maxMembers} partecipanti</small></div><span>${players}</span><span class="room-phase">${room.phase === "started" ? "Avviata" : "In attesa"}</span>`;
+      const join = document.createElement("button");
+      join.className = "button button-primary"; join.type = "button"; join.textContent = "Entra";
+      join.addEventListener("click", () => beginJoinRoom(room));
+      row.append(join);
+      return row;
+    }));
   } catch (error) {
-    showOnlineStatus({ message: error.message, connected: false });
-    setMessage(error.message, true);
+    $("#browser-status").textContent = error.message;
   } finally {
-    $("#host-online-button").disabled = false;
-    $("#join-online-button").disabled = false;
+    ui.browserBusy = false;
+    if ($("#online-browser-dialog").open) ui.browserTimer = setTimeout(refreshRooms, 5000);
   }
 }
 
-$("#host-online-button").addEventListener("click", () => startOnline("/api/multiplayer/host"));
-$("#join-online-button").addEventListener("click", () => startOnline("/api/multiplayer/join", {
-  lobby_id: $("#lobby-code-input").value.trim()
-}));
-$("#copy-lobby-code").addEventListener("click", async () => {
-  const code = $("#lobby-code-output").value;
+async function joinSelectedRoom(password = "") {
+  const room = ui.joinTarget;
+  if (!room) return;
   try {
-    await navigator.clipboard.writeText(code);
-    setMessage("Codice lobby copiato.");
-  } catch (_) {
-    $("#lobby-code-output").select();
-    document.execCommand("copy");
-    setMessage("Codice lobby copiato.");
-  }
-});
-$("#leave-online-button").addEventListener("click", async () => {
-  const status = await api("/api/multiplayer/leave", {});
+    const status = await api("/api/multiplayer/join", { ...onlineProfile(), lobby_id: room.lobbyId, room_name: room.roomName, password_protected: room.passwordProtected, password });
+    if ($("#join-password-dialog").open) $("#join-password-dialog").close();
+    renderRoom(status); pollOnline();
+  } catch (error) { setMessage(error.message, true); }
+}
+
+function beginJoinRoom(room) {
+  clearTimeout(ui.browserTimer);
+  ui.joinTarget = room;
+  if (room.passwordProtected) { $("#join-room-password").value = ""; $("#join-password-dialog").showModal(); }
+  else joinSelectedRoom();
+}
+
+async function leaveOnlineRoom() {
+  await api("/api/multiplayer/leave", {});
+  hideGameScreen();
   clearTimeout(ui.onlineTimer);
   ui.onlineStateKey = null;
-  $("#host-lobby-code").hidden = true;
-  showOnlineStatus(status);
+  if ($("#online-room-dialog").open) $("#online-room-dialog").close();
+  if (!$("#online-browser-dialog").open) $("#online-browser-dialog").showModal();
+  refreshRooms();
+}
+
+$("#refresh-rooms").addEventListener("click", refreshRooms);
+$("#open-host-room").addEventListener("click", () => { $("#room-name").value = `${ui.options.username} - Holy War`; $("#room-password").value = ""; $("#host-room-dialog").showModal(); });
+$("#cancel-host-room").addEventListener("click", () => $("#host-room-dialog").close());
+$("#host-room-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  clearTimeout(ui.browserTimer);
+  try {
+    const status = await api("/api/multiplayer/host", { ...onlineProfile(), room_name: $("#room-name").value, password: $("#room-password").value });
+    $("#host-room-dialog").close(); renderRoom(status); pollOnline();
+  } catch (error) { setMessage(error.message, true); }
 });
+$("#join-password-form").addEventListener("submit", event => { event.preventDefault(); joinSelectedRoom($("#join-room-password").value); });
+$("#cancel-join-room").addEventListener("click", () => $("#join-password-dialog").close());
+async function performRoomAction(payload) {
+  try {
+    await api("/api/multiplayer/room-action", payload);
+    renderRoom(await api("/api/multiplayer/status"));
+  } catch (error) { setMessage(error.message, true); }
+}
+$$('[data-room-role]').forEach(button => button.addEventListener("click", () => performRoomAction({ action: "select_role", role: button.dataset.roomRole })));
+$("#proceed-room").addEventListener("click", () => performRoomAction({ action: "proceed" }));
+$("#confirm-online-deck").addEventListener("click", () => performRoomAction({ action: "select_deck", deck: $("#online-player-deck").value }));
+$("#start-online-match").addEventListener("click", () => performRoomAction({ action: "start" }));
+$("#leave-room").addEventListener("click", leaveOnlineRoom);
 
 $("#game-mode").addEventListener("change", updateSetupMode);
+$("#setup-back-menu").addEventListener("click", () => { $("#setup-dialog").close(); openMainMenu(); });
 $("#setup-form").addEventListener("submit", async event => {
   event.preventDefault();
   if ($("#game-mode").value === "online") return;
@@ -1480,6 +1592,7 @@ $("#setup-form").addEventListener("submit", async event => {
       opponent_deck: $("#opponent-deck").value
     });
     ui.selectedUid = null;
+    showGameScreen();
     render(data);
     $("#setup-dialog").close();
     setMessage(data.message);
@@ -1493,7 +1606,14 @@ $("#setup-form").addEventListener("submit", async event => {
 const helpDialog = $("#help-dialog");
 const pauseDialog = $("#pause-dialog");
 const surrenderDialog = $("#surrender-dialog");
-function openPause() { if (!$('dialog[open]')) pauseDialog.showModal(); }
+function openPause() {
+  if ($('dialog[open]')) return;
+  const online = ui.state?.mode === "online";
+  ["#new-game-button", "#pause-deck-editor-button", "#pause-help-button", "#pause-log-button", "#bug-report-button"]
+    .forEach(selector => $(selector).hidden = online);
+  $("#resume-button").textContent = online ? "Annulla" : "Riprendi partita";
+  pauseDialog.showModal();
+}
 $("#menu-button").addEventListener("click", openPause);
 $("#resume-button").addEventListener("click", () => pauseDialog.close());
 $("#pause-help-button").addEventListener("click", () => { pauseDialog.close(); helpDialog.showModal(); });
@@ -1504,6 +1624,56 @@ $("#bug-report-button").addEventListener("click", () => {
 $("#surrender-button").addEventListener("click", () => surrenderDialog.showModal());
 $("#pause-surrender-button").addEventListener("click", () => { pauseDialog.close(); surrenderDialog.showModal(); });
 $("#confirm-surrender-button").addEventListener("click", () => { surrenderDialog.close(); sendAction({ type: "surrender" }); });
+
+function openMatchSetup(mode) {
+  $("#main-menu-dialog").close();
+  $("#game-mode").value = mode;
+  $("#player-name").value = ui.options.username;
+  $("#player-deck").value = ui.options.default_deck;
+  updateSetupMode();
+  $("#setup-dialog").showModal();
+}
+$("#menu-single-player").addEventListener("click", () => openMatchSetup("ai"));
+$("#menu-local-multiplayer").addEventListener("click", () => openMatchSetup("local"));
+$("#menu-online-multiplayer").addEventListener("click", () => {
+  $("#main-menu-dialog").close(); $("#online-browser-dialog").showModal(); refreshRooms();
+});
+$("#online-browser-back").addEventListener("click", () => {
+  clearTimeout(ui.browserTimer);
+  $("#online-browser-dialog").close();
+  openMainMenu();
+});
+$("#menu-deck-editor").addEventListener("click", () => openDeckEditor($("#main-menu-dialog")));
+$("#menu-test-field").addEventListener("click", openTestGame);
+$("#menu-options").addEventListener("click", () => {
+  $("#main-menu-dialog").close();
+  $("#option-username").value = ui.options.username;
+  $("#option-default-deck").value = ui.options.default_deck;
+  $("#options-dialog").showModal();
+});
+$("#cancel-options").addEventListener("click", () => { $("#options-dialog").close(); openMainMenu(); });
+$("#options-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  try {
+    ui.options = await api("/api/options", { username: $("#option-username").value, default_deck: $("#option-default-deck").value });
+    $("#options-dialog").close(); setMessage(ui.options.message); openMainMenu();
+  } catch (error) { setMessage(error.message, true); }
+});
+$("#menu-close").addEventListener("click", () => $("#close-game-dialog").showModal());
+$("#confirm-close-game").addEventListener("click", async () => {
+  try { await window.pywebview?.api?.close(); } catch (_) { window.close(); }
+});
+async function voteRematch(accept) {
+  $("#rematch-dialog").close();
+  try { await api("/api/multiplayer/room-action", { action: "rematch", accept }); pollOnline(); }
+  catch (error) { setMessage(error.message, true); }
+}
+$("#accept-rematch").addEventListener("click", () => voteRematch(true));
+$("#decline-rematch").addEventListener("click", () => voteRematch(false));
+$("#confirm-coin-toss").addEventListener("click", () => sendAction({ type: "confirm_coin_toss" }));
+$("#coin-toss-dialog").addEventListener("cancel", event => event.preventDefault());
+$("#main-menu-dialog").addEventListener("cancel", event => event.preventDefault());
+$("#online-room-dialog").addEventListener("cancel", event => event.preventDefault());
 $("#close-inspector").addEventListener("click", () => $(".inspector").classList.remove("open"));
 $$('[data-close-dialog]').forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("keydown", event => {
@@ -1516,17 +1686,26 @@ document.addEventListener("keydown", event => {
 
 async function boot() {
   try {
-    const [config, data, online] = await Promise.all([
-      api("/api/config"), api("/api/state"), api("/api/multiplayer/status")
+    const [config, data, online, options] = await Promise.all([
+      api("/api/config"), api("/api/state"), api("/api/multiplayer/status"), api("/api/options")
     ]);
+    ui.config = config;
+    ui.options = options;
     refreshDeckSelects(config);
+    $("#player-name").value = options.username;
+    $("#player-deck").value = options.default_deck;
+    $("#online-player-deck").value = options.default_deck;
+    $("#option-default-deck").value = options.default_deck;
     updateSetupMode();
-    render(data);
-    const first = data.game.players[0].hand[0];
-    if (first) showCard(first, $(`[data-uid="${CSS.escape(first.uid)}"]`));
-    $("#setup-dialog").showModal();
-    showOnlineStatus(online);
-    if (online.connected) pollOnline();
+    if (data.game) {
+      render(data);
+      const first = data.game.players[0].hand[0];
+      if (first) showCard(first, $(`[data-uid="${CSS.escape(first.uid)}"]`));
+    } else {
+      hideGameScreen();
+    }
+    if (online.connected) { renderRoom(online); pollOnline(); }
+    else $("#main-menu-dialog").showModal();
   } catch (error) {
     setMessage("Avvia l'interfaccia con: python -m holywar.web", true);
     $("#end-turn-button").disabled = true;

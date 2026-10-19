@@ -797,6 +797,12 @@ class RuntimeResolutionMixin:
 
             # The handler function defined here is responsible for checking if the trigger conditions are met when the specified event occurs. It verifies if the source of the event is still on the field (if required by the trigger), checks if the event is happening during the correct player's turn, and evaluates any additional conditions specified in the trigger. If all conditions are met, it resolves the effect associated with the trigger. The handler also logs the trigger activation and manages runtime flags to keep track of the event context during resolution.
             def _handler(ctx: RuleEventContext, _te=te, _owner=owner_idx, _source=source_uid, _event_name=event_name):
+                # During hidden preparation each side is an isolated setup
+                # area.  A permanent already placed by the other player must
+                # not react to, or reveal information about, the field that is
+                # currently being prepared.
+                if ctx.engine.state.phase == "preparation" and _owner != ctx.engine.state.active_player:
+                    return
                 if _event_name not in allow_source_off_field and not self._is_uid_on_field(ctx.engine, _source):
                     source_inst = ctx.engine.state.instances.get(_source)
                     is_equipped = bool(
@@ -1085,7 +1091,12 @@ class RuntimeResolutionMixin:
             zones = [target.zone]
 
         pool: list[str] = []
-        for scoped_owner in self._target_owner_indices(owner_idx, target.owner):
+        if engine.state.phase == "preparation":
+            target_owner_key = _norm(target.owner or "me")
+            target_owners = [] if target_owner_key in {"opponent", "enemy", "other"} else [owner_idx]
+        else:
+            target_owners = self._target_owner_indices(owner_idx, target.owner)
+        for scoped_owner in target_owners:
             for zone_name in zones:
                 pool.extend(self._get_zone_cards(engine, scoped_owner, zone_name))
         # Preserve order but avoid duplicates.

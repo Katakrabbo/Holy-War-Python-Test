@@ -91,7 +91,7 @@ class RuntimeEffectsTargetingMixin:
             zones = [z for z in target.zones if str(z).strip()]
             if not zones:
                 zones = [target.zone]
-            for scoped_owner in self._target_owner_indices(owner_idx, target.owner):
+            for scoped_owner in self._target_owner_indices_for_effect(engine, owner_idx, target.owner):
                 p = engine.state.players[scoped_owner]
                 for zone_name in zones:
                     zone = _norm(zone_name)
@@ -155,7 +155,7 @@ class RuntimeEffectsTargetingMixin:
                     source_uid = str(engine.state.flags.get("_runtime_source_card", "")).strip()
                     owner_key = _norm(target.owner)
                     allow_any_owner = owner_key in {"any", "both", "all", "either"}
-                    owner_candidates = self._target_owner_indices(owner_idx, target.owner)
+                    owner_candidates = self._target_owner_indices_for_effect(engine, owner_idx, target.owner)
 
                     # The following block checks if the selected target includes a side prefix (e.g., "opp:", "self:") and adjusts the owner candidates and the selected token accordingly. This allows for more flexible target specifications where the player can indicate whether they are referring to their own cards or their opponent's cards.
                     if ":" in selected:
@@ -242,7 +242,7 @@ class RuntimeEffectsTargetingMixin:
                 if not zones:
                     zones = [target.zone]
                 fallback_pool: list[str] = []
-                for scoped_owner in self._target_owner_indices(owner_idx, target.owner):
+                for scoped_owner in self._target_owner_indices_for_effect(engine, owner_idx, target.owner):
                     for zone_name in zones:
                         fallback_pool.extend(self._get_zone_cards(engine, scoped_owner, zone_name))
                 filtered = self._filter_target_pool(engine, owner_idx, target, fallback_pool)
@@ -271,7 +271,7 @@ class RuntimeEffectsTargetingMixin:
                         continue
 
                     # Check for side prefixes (e.g., "opp:", "self:") to determine owner candidates and adjust the selected token accordingly. This allows for more flexible targeting specifications where the player can indicate whether they are referring to their own cards or their opponent's cards for each selected target.
-                    owner_candidates = self._target_owner_indices(owner_idx, target.owner)
+                    owner_candidates = self._target_owner_indices_for_effect(engine, owner_idx, target.owner)
                     if ":" in selected:
                         side, token = selected.split(":", 1)
                         side_key = _norm(side)
@@ -345,7 +345,7 @@ class RuntimeEffectsTargetingMixin:
                 if not zones:
                     zones = [target.zone]
                 fallback_pool: list[str] = []
-                for scoped_owner in self._target_owner_indices(owner_idx, target.owner):
+                for scoped_owner in self._target_owner_indices_for_effect(engine, owner_idx, target.owner):
                     for zone_name in zones:
                         fallback_pool.extend(self._get_zone_cards(engine, scoped_owner, zone_name))
                 filtered = self._filter_target_pool(engine, owner_idx, target, fallback_pool)
@@ -361,7 +361,7 @@ class RuntimeEffectsTargetingMixin:
             pool.extend(engine.all_saints_on_field(0))
             pool.extend(engine.all_saints_on_field(1))
         elif ttype == "empty_saint_slots_controlled_by_owner":
-            for scoped_owner in self._target_owner_indices(owner_idx, target.owner):
+            for scoped_owner in self._target_owner_indices_for_effect(engine, owner_idx, target.owner):
                 player = engine.state.players[scoped_owner]
                 for i, slot_uid in enumerate(player.attack):
                     if slot_uid is None:
@@ -394,6 +394,20 @@ class RuntimeEffectsTargetingMixin:
         if key in {"any", "both", "all", "either"}:
             return [owner_idx, 1 - owner_idx]
         return [owner_idx]
+
+    def _target_owner_indices_for_effect(
+        self,
+        engine: GameEngine,
+        owner_idx: int,
+        owner_key: str | None,
+    ) -> list[int]:
+        """Resolve a target scope without crossing a hidden setup boundary."""
+        if engine.state.phase == "preparation":
+            key = _norm(owner_key or "me")
+            if key in {"opponent", "enemy", "other"}:
+                return []
+            return [owner_idx]
+        return self._target_owner_indices(owner_idx, owner_key)
 
     def _shuffle_graveyard_if_oltretomba_active(self, engine: GameEngine, player_idx: int) -> None:
         promise_state = dict(
