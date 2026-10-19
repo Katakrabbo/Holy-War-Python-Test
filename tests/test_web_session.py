@@ -6,6 +6,8 @@ import pytest
 
 from holywar.web import WebGameSession
 from holywar.effects.runtime import runtime_cards
+from holywar.multiplayer.protocol import AuthoritativeMatch, MatchCommand, ProtocolError
+from holywar.multiplayer.service import MultiplayerService
 
 
 def test_web_snapshot_hides_opponent_hand_and_exposes_real_cards() -> None:
@@ -20,6 +22,127 @@ def test_web_snapshot_hides_opponent_hand_and_exposes_real_cards() -> None:
         "uid": snapshot["game"]["players"][1]["hand"][0]["uid"],
         "hidden": True,
     }
+
+
+def test_web_config_identifies_the_packaged_application() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+
+    assert session.config()["application"] == "holywar"
+
+
+def test_online_snapshots_keep_each_players_hand_private() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+
+    host = session.snapshot(viewer_idx=0)["game"]["players"]
+    guest = session.snapshot(viewer_idx=1)["game"]["players"]
+
+    assert host[0]["hand"][0].get("hidden") is not True
+    assert host[1]["hand"][0]["hidden"] is True
+    assert guest[0]["hand"][0].get("hidden") is not True
+    assert guest[1]["hand"][0]["hidden"] is True
+
+
+def test_online_action_rejects_player_without_priority() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    wrong_actor = 1 - session.engine.state.active_player
+
+    response = session.action({"type": "end_turn"}, network_actor_idx=wrong_actor)
+
+    assert response["ok"] is False
+    assert "avversario" in response["message"].lower()
+
+
+def test_online_options_use_the_network_players_private_hand() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    guest_uid = session.engine.state.players[1].hand[0]
+
+    options = session.play_options({"uid": guest_uid}, network_actor_idx=1)
+
+    assert options["ok"] is True
+    assert options["uid"] == guest_uid
+
+
+def test_multiplayer_transport_reassembles_large_private_snapshots() -> None:
+    class RecordingBridge:
+        def __init__(self) -> None:
+            self.packets: list[str] = []
+
+        def request(self, operation: str, payload: dict, *, timeout: float = 45) -> dict:
+            assert operation == "send_packet"
+            self.packets.append(payload["data"])
+            return {"sent": True}
+
+    sender_session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    receiver_session = WebGameSession(Path("holywar/data/cards.json"), seed=12)
+    sender = MultiplayerService(sender_session)
+    receiver = MultiplayerService(receiver_session)
+    bridge = RecordingBridge()
+    sender.bridge = bridge  # type: ignore[assignment]
+    receiver.role = "guest"
+    receiver.lobby_id = "lobby"
+    receiver.peer_id = "host"
+    receiver.members = ["host", "guest"]
+    snapshot = sender_session.snapshot(viewer_idx=1)
+    snapshot["game"]["logs"] = ["x" * 5000]
+
+    sender._send_message({"kind": "state", "snapshot": snapshot}, "guest")
+    for packet in bridge.packets:
+        receiver._handle_bridge_event({
+            "type": "packet_received",
+            "payload": {"senderId": "host", "data": packet},
+        })
+
+    assert len(bridge.packets) > 1
+    assert receiver.remote_snapshot == snapshot
+
+
+def test_multiplayer_command_round_trip_and_validation() -> None:
+    original = MatchCommand(
+        match_id="match-1",
+        sender_id="player-1",
+        sequence=3,
+        expected_revision=8,
+        kind="end_turn",
+    )
+
+    restored = MatchCommand.from_dict(original.to_dict())
+
+    assert restored == original
+    invalid = original.to_dict()
+    invalid["protocol_version"] = 999
+    with pytest.raises(ProtocolError):
+        MatchCommand.from_dict(invalid)
+
+
+def test_authoritative_match_orders_commands_and_returns_private_snapshots() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    players = ("host", "guest")
+    match = AuthoritativeMatch("match-1", session, players)
+    active_id = players[session.engine.state.active_player]
+    command = MatchCommand(
+        match_id="match-1",
+        sender_id=active_id,
+        sequence=0,
+        expected_revision=0,
+        kind="end_turn",
+    )
+
+    result = match.apply(command)
+
+    assert result["ok"] is True
+    assert result["revision"] == 1
+    assert result["ack_sequence"] == 0
+    assert result["snapshots"]["host"]["game"]["players"][1]["hand"][0]["hidden"] is True
+    assert result["snapshots"]["guest"]["game"]["players"][1]["hand"][0]["hidden"] is True
+    with pytest.raises(ProtocolError, match="revisione"):
+        match.apply(command)
 
 
 def test_web_deck_editor_exposes_saved_decks_and_unique_catalogue() -> None:

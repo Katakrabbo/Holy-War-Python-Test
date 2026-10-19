@@ -237,11 +237,12 @@
         <select id="game-mode" name="mode">
           <option value="ai">Giocatore contro CPU</option>
           <option value="local">Giocatore contro giocatore (locale)</option>
+          <option value="online">Multiplayer online (Epic Online Services)</option>
         </select>
       </label>
 
       <div class="setup-players">
-        <fieldset>
+        <fieldset id="opponent-setup">
           <legend>Giocatore 1</legend>
           <label class="setup-field"><span>Nome</span><input id="player-name" name="player_name" value="Pellegrino"
               maxlength="28"></label>
@@ -254,6 +255,26 @@
           <label class="setup-field"><span>Mazzo</span><select id="opponent-deck" name="opponent_deck"></select></label>
         </fieldset>
       </div>
+      <section class="online-setup" id="online-setup" hidden>
+        <div class="online-choice">
+          <h3>Ospita partita</h3>
+          <p>Crea una lobby privata e invia il codice al tuo amico.</p>
+          <button class="button button-primary" id="host-online-button" type="button">Crea lobby</button>
+          <div class="lobby-code" id="host-lobby-code" hidden>
+            <label class="setup-field"><span>Codice lobby</span><input id="lobby-code-output" readonly></label>
+            <button class="button button-quiet" id="copy-lobby-code" type="button">Copia codice</button>
+          </div>
+        </div>
+        <div class="online-choice">
+          <h3>Entra in partita</h3>
+          <p>Incolla il codice ricevuto dall'host.</p>
+          <label class="setup-field"><span>Codice lobby</span><input id="lobby-code-input" autocomplete="off"
+              spellcheck="false" placeholder="Inserisci il codice"></label>
+          <button class="button button-primary" id="join-online-button" type="button">Entra nella lobby</button>
+        </div>
+        <p class="online-status" id="online-status" aria-live="polite">Scegli se ospitare o entrare.</p>
+        <button class="button button-quiet" id="leave-online-button" type="button" hidden>Esci dalla lobby</button>
+      </section>
       <div class="setup-actions">
         <button class="button button-quiet" id="setup-deck-editor-button" type="button">Deck Editor</button>
         <button class="button button-quiet" id="setup-test-game-button" type="button">Test carte</button>

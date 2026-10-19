@@ -14,6 +14,7 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.tools/
 venv/
 env/
 
@@ -21,6 +22,8 @@ env/
 *.egg-info/
 build/
 dist/
+bin/
+obj/
 installer/dist/
 *.spec
 
@@ -33,6 +36,10 @@ reports/
 Carte con effetti da fixxare e creare.txt
 installer/*.log
 installer/*.tmp
+installer/vendor/
+multiplayer/eos.settings.json
+multiplayer/eos-sdk/
+multiplayer/EOS-SDK-*.zip
 
 # OS / editor noise
 .DS_Store

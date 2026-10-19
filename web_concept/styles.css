@@ -1593,6 +1593,57 @@ dialog li {
   gap: 10px;
 }
 
+.online-setup {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 14px 0 20px;
+}
+
+.online-setup[hidden] {
+  display: none;
+}
+
+.online-choice {
+  padding: 14px;
+  border: 1px solid #3c4a52;
+  border-radius: 9px;
+  background: rgba(7, 12, 15, .3);
+}
+
+.online-choice h3 {
+  margin: 0 0 6px;
+  color: var(--gold-2);
+  font-family: Georgia, serif;
+}
+
+.online-choice p, .online-status {
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.4;
+}
+
+.online-choice .button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.lobby-code {
+  margin-top: 10px;
+}
+
+.online-status {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--green);
+  background: rgba(114, 217, 154, .08);
+}
+
+#leave-online-button {
+  grid-column: 1 / -1;
+}
+
 .test-game-dialog {
   width: min(1120px, calc(100vw - 24px));
   height: min(820px, calc(100vh - 24px));

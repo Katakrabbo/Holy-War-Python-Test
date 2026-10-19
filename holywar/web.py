@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import random
+import sys
 import threading
+import traceback
 import webbrowser
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from holywar.ai.simple_ai import choose_action
-from holywar.app_paths import bundled_data_dir, bundled_project_root
+from holywar.app_paths import appdata_dir, bundled_data_dir, bundled_project_root, local_appdata_dir
 from holywar.core.engine import GameEngine
 from holywar.core.state import CardInstance, PlayerState
 from holywar.data.deck_builder import (
@@ -30,6 +35,7 @@ from holywar.effects.runtime import runtime_cards
 from holywar.effects.runtime import CardFilterSpec, TargetSpec
 from holywar.effects.library import resolve_card_effect
 from holywar.scripting_api import RuleEventContext
+from holywar.multiplayer.service import MultiplayerService
 
 
 DEFAULT_PLAYER_DECK = "cristianesimo_b3_creatore"
@@ -266,7 +272,7 @@ class WebGameSession:
     def new_game(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
             mode = str(payload.get("mode") or "ai").strip().lower()
-            if mode not in {"ai", "local"}:
+            if mode not in {"ai", "local", "online"}:
                 raise ValueError("Modalita sconosciuta.")
             self.mode = mode
             p1_deck = str(payload.get("player_deck") or DEFAULT_PLAYER_DECK)
@@ -475,10 +481,12 @@ class WebGameSession:
             for deck_id, religion, name in available_premade_decks()
         ]
         return {
+            "application": "holywar",
             "decks": decks,
             "modes": [
                 {"id": "ai", "name": "Giocatore contro CPU"},
                 {"id": "local", "name": "Giocatore contro giocatore (locale)"},
+                {"id": "online", "name": "Multiplayer online (Epic Online Services)"},
             ],
             "defaults": {"player_deck": DEFAULT_PLAYER_DECK, "opponent_deck": DEFAULT_AI_DECK},
         }
@@ -971,11 +979,13 @@ class WebGameSession:
             )
         return steps
 
-    def play_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def play_options(self, payload: dict[str, Any], *, network_actor_idx: int | None = None) -> dict[str, Any]:
         with self.lock:
             if self.engine is None:
                 raise ValueError("Partita non inizializzata.")
-            actor_idx = self.chain_priority_idx if self.chain_active else (self.engine.state.active_player if self.mode == "local" else 0)
+            actor_idx = network_actor_idx if network_actor_idx is not None else (
+                self.chain_priority_idx if self.chain_active else (self.engine.state.active_player if self.mode == "local" else 0)
+            )
             uid = str(payload.get("uid") or "")
             if uid not in self.engine.state.players[actor_idx].hand:
                 raise ValueError("La carta non e nella mano del giocatore attivo.")
@@ -1078,11 +1088,13 @@ class WebGameSession:
             "candidates": [self._candidate_option(candidate, player_idx) for candidate in candidates],
         }
 
-    def activation_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def activation_options(self, payload: dict[str, Any], *, network_actor_idx: int | None = None) -> dict[str, Any]:
         with self.lock:
             if self.engine is None:
                 raise ValueError("Partita non inizializzata.")
-            actor_idx = self.engine.state.active_player if self.mode == "local" else 0
+            actor_idx = network_actor_idx if network_actor_idx is not None else (
+                self.engine.state.active_player if self.mode == "local" else 0
+            )
             source = str(payload.get("source") or "")
             uid = self.engine.resolve_board_uid(actor_idx, source)
             if uid is None:
@@ -1256,17 +1268,26 @@ class WebGameSession:
                 return result
         return self._chain_pass()
 
-    def snapshot(self, *, ok: bool = True, message: str = "") -> dict[str, Any]:
+    def snapshot(
+        self,
+        *,
+        ok: bool = True,
+        message: str = "",
+        viewer_idx: int | None = None,
+    ) -> dict[str, Any]:
         assert self.engine is not None
         state = self.engine.state
         runtime_state = dict(state.flags.get("runtime_state", {}) or {})
-        decision = self.pending_decision or self._runtime_decision()
-        if self.mode == "local":
-            viewer_idx = int(decision["player_index"]) if decision is not None else (
+        raw_decision = self.pending_decision or self._runtime_decision()
+        if viewer_idx is not None and viewer_idx not in {0, 1}:
+            raise ValueError("Indice spettatore non valido.")
+        if viewer_idx is None and self.mode == "local":
+            viewer_idx = int(raw_decision["player_index"]) if raw_decision is not None else (
                 self.chain_priority_idx if self.chain_active else state.active_player
             )
-        else:
+        elif viewer_idx is None:
             viewer_idx = 0
+        decision = raw_decision if raw_decision is not None and int(raw_decision["player_index"]) == viewer_idx else None
         opponent_idx = 1 - viewer_idx
         relative_winner = None
         if state.winner is not None:
@@ -1315,7 +1336,7 @@ class WebGameSession:
         ok, message = self._execute_operation(operation)
         return self.snapshot(ok=ok, message=message)
 
-    def action(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def action(self, payload: dict[str, Any], *, network_actor_idx: int | None = None) -> dict[str, Any]:
         with self.lock:
             if self.engine is None:
                 return {"ok": False, "message": "Partita non inizializzata."}
@@ -1330,7 +1351,15 @@ class WebGameSession:
                 return self.snapshot(message=f"Catena {status}.")
             if state.winner is not None:
                 return self.snapshot(ok=False, message="La partita è terminata.")
-            actor_idx = self.chain_priority_idx if self.chain_active else (state.active_player if self.mode == "local" else 0)
+            expected_actor_idx = self.chain_priority_idx if self.chain_active else state.active_player
+            if network_actor_idx is not None:
+                if self.mode != "online" or network_actor_idx not in {0, 1}:
+                    return self.snapshot(ok=False, message="Identita giocatore di rete non valida.")
+                if network_actor_idx != expected_actor_idx:
+                    return self.snapshot(ok=False, message="Attendi il turno dell'avversario.")
+                actor_idx = network_actor_idx
+            else:
+                actor_idx = expected_actor_idx if self.mode == "local" else 0
             expected_human = not self._is_ai_player(actor_idx)
             if not expected_human or (not self.chain_active and state.active_player != actor_idx):
                 return self.snapshot(ok=False, message="Attendi il turno dell'avversario.")
@@ -1474,6 +1503,7 @@ class WebGameSession:
 
 class HolyWarRequestHandler(SimpleHTTPRequestHandler):
     session: WebGameSession
+    multiplayer: MultiplayerService
 
     def __init__(self, *args: Any, directory: str, **kwargs: Any) -> None:
         super().__init__(*args, directory=directory, **kwargs)
@@ -1497,8 +1527,10 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         path = urlparse(self.path).path
         if path == "/api/state":
-            with self.session.lock:
-                self._send_json(self.session.snapshot())
+            self._send_json(self.multiplayer.snapshot())
+            return
+        if path == "/api/multiplayer/status":
+            self._send_json(self.multiplayer.status())
             return
         if path == "/api/config":
             self._send_json(self.session.config())
@@ -1520,26 +1552,49 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError("Payload non valido.")
             path = urlparse(self.path).path
+            if path == "/api/multiplayer/host":
+                self._send_json(self.multiplayer.host(payload))
+                return
+            if path == "/api/multiplayer/join":
+                self._send_json(self.multiplayer.join(payload))
+                return
+            if path == "/api/multiplayer/leave":
+                self._send_json(self.multiplayer.leave())
+                return
             if path == "/api/new-game":
+                if self.multiplayer.active:
+                    self.multiplayer.leave()
                 self._send_json(self.session.new_game(payload))
                 return
             if path == "/api/test-game":
                 self._send_json(self.session.start_test_game(payload))
                 return
             if path == "/api/play-options":
-                self._send_json(self.session.play_options(payload))
+                self._send_json(
+                    self.multiplayer.request("play_options", payload)
+                    if self.multiplayer.active else self.session.play_options(payload)
+                )
                 return
             if path == "/api/activate-options":
-                self._send_json(self.session.activation_options(payload))
+                self._send_json(
+                    self.multiplayer.request("activate_options", payload)
+                    if self.multiplayer.active else self.session.activation_options(payload)
+                )
                 return
             if path == "/api/ai-step":
                 self._send_json(self.session.ai_step())
                 return
             if path == "/api/decision":
-                self._send_json(self.session.resolve_decision(payload))
+                self._send_json(
+                    self.multiplayer.request("decision", payload)
+                    if self.multiplayer.active else self.session.resolve_decision(payload)
+                )
                 return
             if path == "/api/action":
-                self._send_json(self.session.action(payload))
+                self._send_json(
+                    self.multiplayer.request("action", payload)
+                    if self.multiplayer.active else self.session.action(payload)
+                )
                 return
             if path == "/api/deck-editor/validate":
                 self._send_json(self.session.validate_deck(payload))
@@ -1569,34 +1624,156 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=5174)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--premades-json", type=str, default=None, help="Importa deck premade custom da JSON")
-    parser.add_argument("--no-browser", action="store_true")
+    display = parser.add_mutually_exclusive_group()
+    display.add_argument("--browser", action="store_true", help="Apri l'interfaccia nel browser predefinito")
+    display.add_argument("--no-browser", action="store_true", help="Avvia soltanto il servizio locale")
+    display.add_argument("--smoke-window", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
-def main() -> None:
+def _is_running_holywar(url: str) -> bool:
+    try:
+        with urlopen(f"{url}api/config", timeout=1.0) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return isinstance(payload, dict) and payload.get("application") == "holywar"
+    except (OSError, URLError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+
+def _show_startup_error(log_path: Path) -> None:
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            f"Holy War non e riuscito ad avviarsi.\n\nDettagli salvati in:\n{log_path}",
+            "Holy War - Errore di avvio",
+            0x10,
+        )
+    except Exception:
+        pass
+
+
+def _open_desktop_window(url: str, *, smoke_test: bool = False) -> None:
+    import webview
+
+    window = webview.create_window(
+        "Holy War",
+        url,
+        width=1440,
+        height=900,
+        min_size=(1180, 760),
+        resizable=True,
+        maximized=not smoke_test,
+        hidden=smoke_test,
+        background_color="#080b12",
+        text_select=False,
+        zoomable=False,
+    )
+    if window is None:
+        raise RuntimeError("Impossibile creare la finestra di Holy War.")
+    if smoke_test:
+        window.events.loaded += lambda: window.destroy()
+    storage_dir = local_appdata_dir() / "WebView2"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    webview.start(
+        gui="edgechromium",
+        private_mode=False,
+        storage_path=str(storage_dir),
+        debug=False,
+    )
+
+
+def _run() -> None:
     args = build_parser().parse_args()
     if args.premades_json:
         for warning in register_premades_from_json(args.premades_json):
             print(f"Avviso deck: {warning}")
     static_dir = bundled_project_root() / "web_concept"
     session = WebGameSession(Path(args.cards_json), seed=args.seed)
+    multiplayer = MultiplayerService(session)
 
     def handler(*handler_args: Any, **handler_kwargs: Any) -> HolyWarRequestHandler:
         HolyWarRequestHandler.session = session
+        HolyWarRequestHandler.multiplayer = multiplayer
         return HolyWarRequestHandler(*handler_args, directory=str(static_dir), **handler_kwargs)
 
-    server = ThreadingHTTPServer((args.host, args.port), handler)
-    url = f"http://{args.host}:{args.port}/"
-    print(f"Holy War web avviato su {url}")
-    print("Premi Ctrl+C per arrestare il server.")
-    if not args.no_browser:
-        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    server: ThreadingHTTPServer | None
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        server = ThreadingHTTPServer((args.host, args.port), handler)
+    except OSError:
+        requested_url = f"http://{args.host}:{args.port}/"
+        if args.port and _is_running_holywar(requested_url):
+            server = None
+            url = requested_url
+        else:
+            # A different application owns the requested port. Keep the local-only
+            # security boundary and let Windows assign a free ephemeral port.
+            server = ThreadingHTTPServer((args.host, 0), handler)
+    if server is not None:
+        server.daemon_threads = True
+        actual_port = int(server.server_address[1])
+        url = f"http://{args.host}:{actual_port}/"
+
+    if args.browser:
+        if server is None:
+            webbrowser.open(url)
+            multiplayer.close()
+            return
+        print(f"Holy War web avviato su {url}")
+        webbrowser.open(url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+            multiplayer.close()
+        return
+
+    if args.no_browser:
+        if server is None:
+            multiplayer.close()
+            return
+        print(f"Holy War web avviato su {url}")
+        print("Premi Ctrl+C per arrestare il server.")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+            multiplayer.close()
+        return
+
+    server_thread: threading.Thread | None = None
+    if server is not None:
+        server_thread = threading.Thread(target=server.serve_forever, name="holywar-local-server", daemon=True)
+        server_thread.start()
+    try:
+        _open_desktop_window(url, smoke_test=args.smoke_window)
     finally:
-        server.server_close()
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        if server_thread is not None:
+            server_thread.join(timeout=5)
+        multiplayer.close()
+
+
+def main() -> None:
+    try:
+        _run()
+    except Exception:
+        log_dir = appdata_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "startup_error.log"
+        timestamp = dt.datetime.now().astimezone().isoformat(timespec="seconds")
+        log_path.write_text(f"[{timestamp}]\n{traceback.format_exc()}", encoding="utf-8")
+        _show_startup_error(log_path)
+        raise
 
 
 if __name__ == "__main__":

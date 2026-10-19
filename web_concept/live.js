@@ -7,6 +7,9 @@ const ui = {
   contextCard: null,
   effectSelection: null,
   aiTimer: null,
+  onlineTimer: null,
+  onlineBusy: false,
+  onlineStateKey: null,
   decisionId: null,
   runtimeSelectionOrder: [],
   deckEditor: null,
@@ -1368,15 +1371,104 @@ $("#test-game-dialog").addEventListener("close", () => {
 });
 
 function updateSetupMode() {
-  const versusAi = $("#game-mode").value === "ai";
+  const mode = $("#game-mode").value;
+  const versusAi = mode === "ai";
+  const online = mode === "online";
   $("#opponent-name").disabled = versusAi;
   $("#opponent-name").value = versusAi ? "Custode" : ($("#opponent-name").value === "Custode" ? "Giocatore 2" : $("#opponent-name").value);
   $("#opponent-name-label").textContent = versusAi ? "Nome CPU" : "Nome giocatore 2";
+  $("#opponent-setup").hidden = online;
+  $("#online-setup").hidden = !online;
+  $("#start-game-button").hidden = online;
 }
+
+function onlineProfile() {
+  return {
+    player_name: $("#player-name").value,
+    player_deck: $("#player-deck").value
+  };
+}
+
+function showOnlineStatus(status) {
+  $("#online-status").textContent = status.message || "Connessione multiplayer pronta.";
+  $("#leave-online-button").hidden = !status.connected;
+  if (status.lobby_id && status.role === "host") {
+    $("#host-lobby-code").hidden = false;
+    $("#lobby-code-output").value = status.lobby_id;
+  }
+}
+
+async function pollOnline() {
+  clearTimeout(ui.onlineTimer);
+  if (ui.onlineBusy) {
+    ui.onlineTimer = setTimeout(pollOnline, 500);
+    return;
+  }
+  ui.onlineBusy = true;
+  try {
+    const status = await api("/api/multiplayer/status");
+    showOnlineStatus(status);
+    if (status.playing) {
+      if ($("#setup-dialog").open) $("#setup-dialog").close();
+      const data = await api("/api/state");
+      const key = JSON.stringify(data.game);
+      if (key !== ui.onlineStateKey) {
+        ui.onlineStateKey = key;
+        render(data);
+      }
+    }
+    if (status.connected) ui.onlineTimer = setTimeout(pollOnline, 650);
+  } catch (error) {
+    $("#online-status").textContent = error.message;
+    ui.onlineTimer = setTimeout(pollOnline, 1500);
+  } finally {
+    ui.onlineBusy = false;
+  }
+}
+
+async function startOnline(path, extra = {}) {
+  $("#host-online-button").disabled = true;
+  $("#join-online-button").disabled = true;
+  try {
+    const status = await api(path, { ...onlineProfile(), ...extra });
+    showOnlineStatus(status);
+    pollOnline();
+  } catch (error) {
+    showOnlineStatus({ message: error.message, connected: false });
+    setMessage(error.message, true);
+  } finally {
+    $("#host-online-button").disabled = false;
+    $("#join-online-button").disabled = false;
+  }
+}
+
+$("#host-online-button").addEventListener("click", () => startOnline("/api/multiplayer/host"));
+$("#join-online-button").addEventListener("click", () => startOnline("/api/multiplayer/join", {
+  lobby_id: $("#lobby-code-input").value.trim()
+}));
+$("#copy-lobby-code").addEventListener("click", async () => {
+  const code = $("#lobby-code-output").value;
+  try {
+    await navigator.clipboard.writeText(code);
+    setMessage("Codice lobby copiato.");
+  } catch (_) {
+    $("#lobby-code-output").select();
+    document.execCommand("copy");
+    setMessage("Codice lobby copiato.");
+  }
+});
+$("#leave-online-button").addEventListener("click", async () => {
+  const status = await api("/api/multiplayer/leave", {});
+  clearTimeout(ui.onlineTimer);
+  ui.onlineStateKey = null;
+  $("#host-lobby-code").hidden = true;
+  showOnlineStatus(status);
+});
 
 $("#game-mode").addEventListener("change", updateSetupMode);
 $("#setup-form").addEventListener("submit", async event => {
   event.preventDefault();
+  if ($("#game-mode").value === "online") return;
   const submit = $("#start-game-button");
   submit.disabled = true;
   try {
@@ -1424,13 +1516,17 @@ document.addEventListener("keydown", event => {
 
 async function boot() {
   try {
-    const [config, data] = await Promise.all([api("/api/config"), api("/api/state")]);
+    const [config, data, online] = await Promise.all([
+      api("/api/config"), api("/api/state"), api("/api/multiplayer/status")
+    ]);
     refreshDeckSelects(config);
     updateSetupMode();
     render(data);
     const first = data.game.players[0].hand[0];
     if (first) showCard(first, $(`[data-uid="${CSS.escape(first.uid)}"]`));
     $("#setup-dialog").showModal();
+    showOnlineStatus(online);
+    if (online.connected) pollOnline();
   } catch (error) {
     setMessage("Avvia l'interfaccia con: python -m holywar.web", true);
     $("#end-turn-button").disabled = true;

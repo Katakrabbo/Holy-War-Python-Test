@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>HolyWar.Multiplayer.Bridge</AssemblyName>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="Exists('..\eos-sdk\SDK\Source')">
+    <DefineConstants>EOS_SDK_AVAILABLE;$(DefineConstants)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="Exists('..\eos-sdk\SDK\Source')">
+    <ProjectReference Include="..\Epic.OnlineServices\Epic.OnlineServices.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('..\eos-sdk\SDK\Bin\EOSSDK-Win64-Shipping.dll')">
+    <None Include="..\eos-sdk\SDK\Bin\EOSSDK-Win64-Shipping.dll" Link="EOSSDK-Win64-Shipping.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!Exists('..\eos-sdk\SDK\Source')">
+    <Compile Remove="EosMultiplayerProvider.cs" />
+  </ItemGroup>
+</Project>

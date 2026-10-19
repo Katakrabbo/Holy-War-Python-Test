@@ -28,13 +28,14 @@ In alternativa:
 .\.venv\Scripts\python.exe -m holywar.web --cards-json "holywar/data/cards.json"
 ```
 
-Il comando apre `http://127.0.0.1:5174/` e mantiene tutte le regole nel motore Python.
-Per non aprire automaticamente il browser aggiungi `--no-browser`.
+Il comando apre Holy War in una finestra desktop dedicata e mantiene tutte le regole nel motore Python.
+Per la diagnostica puoi ancora aprire l'interfaccia nel browser con `--browser`, oppure avviare
+soltanto il servizio locale con `--no-browser`.
 
-Lo stesso parametro funziona anche con il comando npm:
+Gli stessi parametri funzionano anche con il comando npm:
 
 ```powershell
-npm run dev -- --no-browser
+npm run dev -- --browser
 ```
 
 Prima di aggiungere o modificare carte puoi controllare dati e script senza avviare una partita:
@@ -54,7 +55,7 @@ La vecchia GUI desktop e la CLI restano nel repository soltanto come riferimento
 
 ## Funzionalita MVP
 
-- Modalita `1v1 locale` e `vs AI`
+- Modalita `1v1 locale`, `vs AI` e multiplayer online 1v1 tramite Epic Online Services
 - Deck test deterministici per ogni religione (niente deck casuali)
 - Deck premade selezionabili per religione nella GUI
 - Meccaniche core: pesca, ispirazione, mano max 8, campo attacco/difesa, attacchi, peccato, cimitero, scomunica, token
@@ -86,25 +87,35 @@ Il motore usa nomi/variabili in inglese e testi output in italiano.
 
 ## Installer Windows (.exe setup)
 
-Prerequisiti:
+Prerequisiti sul solo PC usato per creare l'installer:
+- Python 3.11 o successivo
 - Inno Setup 6 installato (`ISCC.exe`)
-- venv attiva con dipendenze (`pip install -e .[dev]`)
+- SDK EOS C# estratto e credenziali configurate come descritto in `multiplayer/README.md`
+- SDK .NET 8 (installabile localmente con `scripts\setup_multiplayer_dev.ps1`)
+
+Gli amici che installano il gioco non devono avere Python, Node.js, .NET o Inno Setup.
 
 Comando completo (build exe + setup installer):
 
 ```powershell
-.\scripts\build_installer.ps1 -Version 0.1.0
+.\scripts\build_installer.ps1 -Version 0.2.0
 ```
+
+Il comando crea automaticamente `.venv` se manca, installa gli strumenti di build,
+esegue i test, genera l'app portabile e verifica che il suo server locale risponda
+prima di compilare l'installer.
 
 Comando rapido (se hai gia `dist\HolyWar` e vuoi solo rigenerare il setup):
 
 ```powershell
-.\scripts\build_installer.ps1 -Version 0.1.0 -SkipPyInstaller
+.\scripts\build_installer.ps1 -Version 0.2.0 -SkipPyInstaller
 ```
 
 Cosa fa lo script:
 - compila l'app web locale con PyInstaller in `dist\HolyWar\`
 - include catalogo, script degli effetti, interfaccia web e deck precreati
+- pubblica il bridge EOS e il runtime .NET 8 self-contained in `dist\HolyWar\multiplayer\`
+- verifica il bridge incluso prima di creare il setup
 - compila l'installer Inno Setup usando `installer\HolyWar.iss`
 
 Output finale:
