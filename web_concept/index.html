@@ -473,6 +473,12 @@
       <aside class="deck-library">
         <div class="deck-library-title"><strong>I tuoi deck</strong><button class="button button-quiet"
             id="deck-new-button" type="button">Nuovo</button></div>
+        <div class="deck-transfer-actions">
+          <button class="button button-quiet" id="deck-import-button" type="button">Importa JSON</button>
+          <button class="button button-quiet" id="deck-export-button" type="button" disabled>Esporta (0)</button>
+          <label class="deck-select-all"><input id="deck-select-all" type="checkbox"><span>Seleziona tutti</span></label>
+          <input id="deck-import-input" type="file" accept="application/json,.json" multiple hidden>
+        </div>
         <div id="deck-saved-list" class="deck-saved-list" role="listbox" aria-label="Deck salvati"></div>
       </aside>
       <section class="deck-workspace">

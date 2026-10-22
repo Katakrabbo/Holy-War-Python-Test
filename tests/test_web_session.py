@@ -1,4 +1,5 @@
 from pathlib import Path
+import copy
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from holywar.effects.runtime import EffectSpec, TargetSpec, runtime_cards
 from holywar.scripting_api import RuleEventContext
 from holywar.multiplayer.protocol import AuthoritativeMatch, MatchCommand, ProtocolError
 from holywar.multiplayer.service import MultiplayerService
+from holywar.data import deck_builder
 
 
 def test_web_snapshot_hides_opponent_hand_and_exposes_real_cards() -> None:
@@ -311,6 +313,65 @@ def test_web_deck_editor_uses_legacy_minimum_and_copy_limits() -> None:
     assert incomplete["valid"] is False
     assert any("6/45" in error for error in incomplete["errors"])
     assert any("max 5" in error for error in incomplete["errors"])
+
+
+def test_deck_editor_exports_and_imports_multiple_decks(tmp_path: Path) -> None:
+    original_decks = copy.deepcopy(deck_builder._RUNTIME_PREMADE_DECKS)  # noqa: SLF001
+    original_store = deck_builder.PREMADE_STORE_PATH
+    try:
+        deck_builder.PREMADE_STORE_PATH = tmp_path / "premade_decks.json"
+        session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+        source_ids = [deck["id"] for deck in session.deck_editor()["decks"][:2]]
+
+        exported = session.export_decks({"deck_ids": source_ids})
+
+        assert exported["document"]["format"] == "holywar-decks"
+        assert len(exported["document"]["decks"]) == 2
+
+        first, second = copy.deepcopy(exported["document"]["decks"])
+        first["id"] = "test_imported_first"
+        second["id"] = "test_imported_second"
+        imported = session.import_decks({
+            "documents": [
+                {"format": "holywar-decks", "version": 1, "decks": [first]},
+                second,
+            ]
+        })
+
+        assert imported["ok"] is True
+        assert {deck["id"] for deck in imported["report"]["imported"]} == {
+            "test_imported_first",
+            "test_imported_second",
+        }
+        assert deck_builder.PREMADE_STORE_PATH.is_file()
+
+        conflicting = copy.deepcopy(first)
+        conflicting["name"] = f"{conflicting['name']} - copia"
+        collision = session.import_decks({"documents": [conflicting]})
+        collision_id = collision["report"]["imported"][0]["id"]
+        assert collision_id != conflicting["id"]
+        assert collision_id.startswith("test_imported_first_imported")
+
+        assert deck_builder.delete_runtime_deck("cristianesimo_b3_creatore") is True
+        config = session.config()
+        assert config["defaults"]["player_deck"] in {deck["id"] for deck in config["decks"]}
+        assert session.new_game({"mode": "ai"})["ok"] is True
+    finally:
+        deck_builder.PREMADE_STORE_PATH = original_store
+        deck_builder._RUNTIME_PREMADE_DECKS.clear()  # noqa: SLF001
+        deck_builder._RUNTIME_PREMADE_DECKS.update(original_decks)  # noqa: SLF001
+
+
+def test_deck_import_skips_an_identical_existing_deck() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    deck_id = session.deck_editor()["decks"][0]["id"]
+    exported = session.export_decks({"deck_ids": [deck_id]})
+
+    result = session.import_decks({"documents": [exported["document"]]})
+
+    assert result["report"]["imported"] == []
+    assert result["report"]["skipped"]
+    assert result["report"]["errors"] == []
 
 
 def test_effect_target_options_include_complete_card_preview() -> None:

@@ -159,6 +159,115 @@ def runtime_premade_decks() -> list[dict]:
     return out
 
 
+def export_runtime_decks(deck_ids: list[str]) -> dict:
+    """Return a portable, versioned JSON payload for one or more decks."""
+    requested = [str(deck_id).strip() for deck_id in deck_ids if str(deck_id).strip()]
+    if not requested:
+        raise ValueError("Seleziona almeno un deck da esportare.")
+    missing = [deck_id for deck_id in requested if deck_id not in _RUNTIME_PREMADE_DECKS]
+    if missing:
+        raise ValueError(f"Deck non trovato: {missing[0]}")
+    decks = []
+    for deck_id in dict.fromkeys(requested):
+        deck = get_runtime_premade(deck_id)
+        if deck is None:
+            continue
+        decks.append({
+            "id": deck["id"],
+            "religion": deck["religion"],
+            "name": deck["name"],
+            "allow_over_45": bool(deck.get("allow_over_45", False)),
+            "cards": [{"name": name, "qty": qty} for name, qty in deck.get("cards", [])],
+        })
+    return {"format": "holywar-decks", "version": 1, "decks": decks}
+
+
+def _portable_decks_from_document(document: object) -> list[dict]:
+    if isinstance(document, dict) and isinstance(document.get("decks"), list):
+        return [item for item in document["decks"] if isinstance(item, dict)]
+    if isinstance(document, dict) and all(key in document for key in ("name", "religion", "cards")):
+        return [document]
+    if isinstance(document, list):
+        return [item for item in document if isinstance(item, dict)]
+    raise ValueError("Formato deck non riconosciuto.")
+
+
+def _unique_import_id(preferred_id: str, name: str) -> str:
+    base = re.sub(r"[^a-z0-9_]+", "_", _norm(preferred_id or name).replace(" ", "_")).strip("_") or "deck"
+    candidate = base
+    suffix = 2
+    while candidate in _RUNTIME_PREMADE_DECKS:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def import_runtime_deck_documents(cards: list[CardDefinition], documents: list[object]) -> dict:
+    """Validate and persist decks imported from one or more JSON documents."""
+    if not documents:
+        raise ValueError("Seleziona almeno un file JSON da importare.")
+    raw_decks: list[dict] = []
+    for document in documents:
+        raw_decks.extend(_portable_decks_from_document(document))
+    if not raw_decks:
+        raise ValueError("Il file non contiene deck importabili.")
+    if len(raw_decks) > 200:
+        raise ValueError("Puoi importare al massimo 200 deck alla volta.")
+
+    imported: list[dict] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    valid_religions = set(available_religions(cards))
+    for index, raw in enumerate(raw_decks, start=1):
+        label = str(raw.get("name") or f"Deck {index}").strip()
+        try:
+            deck = _normalize_deck_payload({**raw, "id": str(raw.get("id") or label)})
+            if not deck["name"] or not deck["religion"]:
+                raise ValueError("nome o religione mancanti")
+            if deck["religion"] not in valid_religions:
+                raise ValueError(f"religione non valida: {deck['religion']}")
+            entries = [{"name": name, "qty": qty} for name, qty in deck["cards"]]
+            report = validate_deck_cards(cards, entries)
+            if not report["valid"]:
+                raise ValueError("; ".join(report["errors"]))
+
+            preferred_id = str(deck["id"]).strip()
+            existing = _RUNTIME_PREMADE_DECKS.get(preferred_id)
+            normalized_cards = [(item["name"], item["qty"]) for item in report["cards"]]
+            if existing is not None:
+                existing_cards = sorted(
+                    [(str(name), int(qty)) for name, qty in list(existing.get("cards", []))],
+                    key=lambda item: _norm(item[0]),
+                )
+                same_deck = (
+                    str(existing.get("religion")) == deck["religion"]
+                    and str(existing.get("name")) == deck["name"]
+                    and existing_cards == normalized_cards
+                )
+                if same_deck:
+                    skipped.append(deck["name"])
+                    continue
+                resolved_id = _unique_import_id(f"{preferred_id}_imported", deck["name"])
+            else:
+                resolved_id = _unique_import_id(preferred_id, deck["name"])
+
+            _RUNTIME_PREMADE_DECKS[resolved_id] = {
+                "religion": deck["religion"],
+                "name": deck["name"],
+                "cards": normalized_cards,
+                "allow_over_45": bool(deck.get("allow_over_45", True)),
+            }
+            imported_deck = get_runtime_premade(resolved_id)
+            if imported_deck is not None:
+                imported.append(imported_deck)
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"{label}: {exc}")
+
+    if imported:
+        export_premades_json(PREMADE_STORE_PATH)
+    return {"imported": imported, "skipped": skipped, "errors": errors}
+
+
 def max_copies_for_crosses(crosses: str) -> int:
     """Return the copy limit used by the legacy deck editor."""
     raw = str(crosses or "").strip().lower()

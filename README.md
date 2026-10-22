@@ -51,6 +51,12 @@ Se vuoi usare deck premade custom, aggiungi `--premades-json "my_premades.json"`
 I deck creati/modificati da GUI vengono salvati in:
 - Windows: `%APPDATA%\HolyWar\premade_decks.json`
 
+Al primo avvio questo archivio personale viene inizializzato con i deck base inclusi
+nel gioco. In seguito gli aggiornamenti non lo sovrascrivono: ogni giocatore puo
+modificare o eliminare i deck base e crearne di propri. Dal Deck Editor e possibile
+importare uno o piu file JSON ed esportare uno o piu deck selezionati in un unico
+pacchetto JSON condivisibile.
+
 La vecchia GUI desktop e la CLI restano nel repository soltanto come riferimento compatibile durante il completamento del porting.
 
 ## Funzionalita MVP

@@ -24,6 +24,8 @@ from holywar.data.deck_builder import (
     available_premade_decks,
     available_religions,
     delete_runtime_deck,
+    export_runtime_decks,
+    import_runtime_deck_documents,
     max_copies_for_crosses,
     register_premades_from_json,
     runtime_premade_decks,
@@ -288,8 +290,8 @@ class WebGameSession:
             if mode not in {"ai", "local", "online"}:
                 raise ValueError("Modalita sconosciuta.")
             self.mode = mode
-            p1_deck = str(payload.get("player_deck") or DEFAULT_PLAYER_DECK)
-            p2_deck = str(payload.get("opponent_deck") or DEFAULT_AI_DECK)
+            p1_deck = self._resolve_deck_id(payload.get("player_deck"), DEFAULT_PLAYER_DECK)
+            p2_deck = self._resolve_deck_id(payload.get("opponent_deck"), DEFAULT_AI_DECK, offset=1)
             p1_name = str(payload.get("player_name") or "Pellegrino").strip() or "Pellegrino"
             default_p2_name = "Custode" if mode == "ai" else "Giocatore 2"
             p2_name = str(payload.get("opponent_name") or default_p2_name).strip() or default_p2_name
@@ -446,12 +448,14 @@ class WebGameSession:
 
             p1 = build_player(0, raw_players[0])
             p2 = build_player(1, raw_players[1])
+            p1_base_deck = self._resolve_deck_id(None, DEFAULT_PLAYER_DECK)
+            p2_base_deck = self._resolve_deck_id(None, DEFAULT_AI_DECK, offset=1)
             base = GameEngine.create_new(
                 cards=self.cards, p1_name=p1.name, p2_name=p2.name,
-                p1_expansion=self._deck_religion(DEFAULT_PLAYER_DECK),
-                p2_expansion=self._deck_religion(DEFAULT_AI_DECK),
-                p1_premade_deck_id=DEFAULT_PLAYER_DECK,
-                p2_premade_deck_id=DEFAULT_AI_DECK, seed=self.seed,
+                p1_expansion=self._deck_religion(p1_base_deck),
+                p2_expansion=self._deck_religion(p2_base_deck),
+                p1_premade_deck_id=p1_base_deck,
+                p2_premade_deck_id=p2_base_deck, seed=self.seed,
             )
             flags = base.state.flags
             flags.pop("runtime_state", None)
@@ -496,11 +500,24 @@ class WebGameSession:
                 return religion
         raise ValueError(f"Deck sconosciuto: {deck_id}")
 
+    def _resolve_deck_id(self, requested: object, preferred: str, *, offset: int = 0) -> str:
+        deck_ids = [deck_id for deck_id, _religion, _name in available_premade_decks()]
+        requested_id = str(requested or "").strip()
+        if requested_id in deck_ids:
+            return requested_id
+        if preferred in deck_ids:
+            return preferred
+        if not deck_ids:
+            raise ValueError("Non ci sono deck disponibili. Creane o importane uno dal Deck Editor.")
+        return deck_ids[min(max(0, offset), len(deck_ids) - 1)]
+
     def config(self) -> dict[str, Any]:
         decks = [
             {"id": deck_id, "religion": religion, "name": name}
             for deck_id, religion, name in available_premade_decks()
         ]
+        player_default = self._resolve_deck_id(None, DEFAULT_PLAYER_DECK) if decks else ""
+        opponent_default = self._resolve_deck_id(None, DEFAULT_AI_DECK, offset=1) if decks else ""
         return {
             "application": "holywar",
             "decks": decks,
@@ -509,7 +526,7 @@ class WebGameSession:
                 {"id": "local", "name": "Giocatore contro giocatore (locale)"},
                 {"id": "online", "name": "Multiplayer online (Epic Online Services)"},
             ],
-            "defaults": {"player_deck": DEFAULT_PLAYER_DECK, "opponent_deck": DEFAULT_AI_DECK},
+            "defaults": {"player_deck": player_default, "opponent_deck": opponent_default},
         }
 
     def deck_editor(self) -> dict[str, Any]:
@@ -567,6 +584,37 @@ class WebGameSession:
             if not delete_runtime_deck(deck_id):
                 raise ValueError("Deck non trovato.")
             return {"ok": True, "message": "Deck eliminato.", "editor": self.deck_editor(), "config": self.config()}
+
+    def export_decks(self, payload: dict[str, Any]) -> dict[str, Any]:
+        deck_ids = payload.get("deck_ids", [])
+        if not isinstance(deck_ids, list):
+            raise ValueError("Selezione deck non valida.")
+        document = export_runtime_decks([str(deck_id) for deck_id in deck_ids])
+        count = len(document["decks"])
+        filename = "holywar-deck.json" if count == 1 else f"holywar-{count}-decks.json"
+        return {"ok": True, "filename": filename, "document": document}
+
+    def import_decks(self, payload: dict[str, Any]) -> dict[str, Any]:
+        documents = payload.get("documents", [])
+        if not isinstance(documents, list):
+            raise ValueError("Documenti di importazione non validi.")
+        with self.lock:
+            report = import_runtime_deck_documents(self.cards, documents)
+            imported_count = len(report["imported"])
+            skipped_count = len(report["skipped"])
+            error_count = len(report["errors"])
+            message = f"Importati {imported_count} deck"
+            if skipped_count:
+                message += f", {skipped_count} duplicati ignorati"
+            if error_count:
+                message += f", {error_count} non validi"
+            return {
+                "ok": imported_count > 0 or (skipped_count > 0 and error_count == 0),
+                "message": message + ".",
+                "report": report,
+                "editor": self.deck_editor(),
+                "config": self.config(),
+            }
 
     def _card(
         self,
@@ -1665,9 +1713,8 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/options":
                 username = str(payload.get("username") or "Pellegrino").strip()[:28] or "Pellegrino"
-                default_deck = str(payload.get("default_deck") or DEFAULT_PLAYER_DECK).strip()
+                default_deck = self.session._resolve_deck_id(payload.get("default_deck"), DEFAULT_PLAYER_DECK)
                 chain_enabled = bool(payload.get("chain_enabled", True))
-                self.session._deck_religion(default_deck)
                 self.user_settings.update({
                     "username": username,
                     "default_deck": default_deck,
@@ -1722,6 +1769,12 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
                 return
             if path == "/api/deck-editor/delete":
                 self._send_json(self.session.delete_deck(payload))
+                return
+            if path == "/api/deck-editor/export":
+                self._send_json(self.session.export_decks(payload))
+                return
+            if path == "/api/deck-editor/import":
+                self._send_json(self.session.import_decks(payload))
                 return
             self._send_json({"ok": False, "message": "Endpoint sconosciuto."}, HTTPStatus.NOT_FOUND)
         except (ValueError, KeyError, json.JSONDecodeError) as exc:
@@ -1782,6 +1835,23 @@ def _open_desktop_window(url: str, *, smoke_test: bool = False) -> None:
             if window is not None:
                 window.destroy()
             return True
+
+        def save_deck_export(self, content: str, suggested_filename: str) -> dict[str, Any]:
+            safe_name = Path(str(suggested_filename or "holywar-decks.json")).name
+            if not safe_name.lower().endswith(".json"):
+                safe_name += ".json"
+            if window is None:
+                return {"ok": False, "message": "Finestra non disponibile."}
+            selected = window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=safe_name,
+                file_types=("File JSON (*.json)",),
+            )
+            if not selected:
+                return {"ok": False, "cancelled": True}
+            destination = Path(selected[0])
+            destination.write_text(str(content), encoding="utf-8")
+            return {"ok": True, "path": str(destination)}
 
     window = webview.create_window(
         "Holy War",

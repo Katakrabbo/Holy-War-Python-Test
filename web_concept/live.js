@@ -17,6 +17,7 @@ const ui = {
   deckEditor: null,
   deckDraft: null,
   deckEditorReturn: null,
+  deckExportSelection: new Set(),
   deckValidationTimer: null,
   testEditor: null,
   testDraft: null,
@@ -914,6 +915,11 @@ function refreshDeckSelects(config) {
   if ($("#option-default-deck")) fillDeckSelect($("#option-default-deck"), config.decks, currentPlayer);
 }
 
+function preferredDeckId() {
+  const saved = ui.options?.default_deck;
+  return ui.config?.decks?.some(deck => deck.id === saved) ? saved : ui.config?.defaults?.player_deck;
+}
+
 function freshDeckDraft() {
   return { id: null, name: "", religion: ui.deckEditor?.religions?.[0] || "", cards: new Map() };
 }
@@ -936,7 +942,21 @@ function loadDeckDraft(deck = null) {
 function renderDeckLibrary() {
   const list = $("#deck-saved-list");
   list.replaceChildren();
+  const availableIds = new Set((ui.deckEditor?.decks || []).map(deck => deck.id));
+  ui.deckExportSelection = new Set([...ui.deckExportSelection].filter(id => availableIds.has(id)));
   (ui.deckEditor?.decks || []).forEach(deck => {
+    const row = document.createElement("div");
+    row.className = "deck-saved-entry-row";
+    const selection = document.createElement("input");
+    selection.type = "checkbox";
+    selection.className = "deck-export-checkbox";
+    selection.checked = ui.deckExportSelection.has(deck.id);
+    selection.setAttribute("aria-label", `Seleziona ${deck.name} per l'esportazione`);
+    selection.addEventListener("change", () => {
+      if (selection.checked) ui.deckExportSelection.add(deck.id);
+      else ui.deckExportSelection.delete(deck.id);
+      updateDeckExportControls();
+    });
     const button = document.createElement("button");
     button.type = "button";
     button.className = `deck-saved-entry${deck.id === ui.deckDraft?.id ? " active" : ""}`;
@@ -948,8 +968,19 @@ function renderDeckLibrary() {
     religion.textContent = deck.religion;
     button.append(name, religion);
     button.addEventListener("click", () => loadDeckDraft(deck));
-    list.append(button);
+    row.append(selection, button);
+    list.append(row);
   });
+  updateDeckExportControls();
+}
+
+function updateDeckExportControls() {
+  const count = ui.deckExportSelection.size;
+  const allDecks = ui.deckEditor?.decks || [];
+  $("#deck-export-button").disabled = count === 0;
+  $("#deck-export-button").textContent = `Esporta (${count})`;
+  $("#deck-select-all").checked = allDecks.length > 0 && count === allDecks.length;
+  $("#deck-select-all").indeterminate = count > 0 && count < allDecks.length;
 }
 
 function showDeckCardInfo(card) {
@@ -1099,6 +1130,7 @@ async function openDeckEditor(returnDialog) {
   returnDialog?.close();
   try {
     ui.deckEditor = await api("/api/deck-editor");
+    ui.deckExportSelection = new Set();
     populateDeckEditorFilters();
     $("#deck-search").value = "";
     loadDeckDraft();
@@ -1112,6 +1144,76 @@ async function openDeckEditor(returnDialog) {
 $("#setup-deck-editor-button").addEventListener("click", () => openDeckEditor($("#setup-dialog")));
 $("#pause-deck-editor-button").addEventListener("click", () => openDeckEditor($("#pause-dialog")));
 $("#deck-new-button").addEventListener("click", () => loadDeckDraft());
+$("#deck-select-all").addEventListener("change", event => {
+  ui.deckExportSelection = event.target.checked
+    ? new Set((ui.deckEditor?.decks || []).map(deck => deck.id))
+    : new Set();
+  renderDeckLibrary();
+});
+$("#deck-import-button").addEventListener("click", () => $("#deck-import-input").click());
+$("#deck-import-input").addEventListener("change", async event => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  if (!files.length) return;
+  const button = $("#deck-import-button");
+  button.disabled = true;
+  try {
+    const documents = [];
+    const parseErrors = [];
+    for (const file of files) {
+      try {
+        documents.push(JSON.parse(await file.text()));
+      } catch (_) {
+        parseErrors.push(`${file.name}: il file non contiene JSON valido.`);
+      }
+    }
+    if (!documents.length) throw new Error(parseErrors.join(" | "));
+    const result = await api("/api/deck-editor/import", { documents });
+    ui.deckEditor = result.editor;
+    ui.config = result.config;
+    ui.deckExportSelection = new Set((result.report.imported || []).map(deck => deck.id));
+    refreshDeckSelects(result.config);
+    populateDeckEditorFilters();
+    const lastImported = (result.report.imported || []).at(-1);
+    loadDeckDraft(lastImported ? result.editor.decks.find(deck => deck.id === lastImported.id) : null);
+    const importErrors = [...(result.report.errors || []), ...parseErrors];
+    const details = importErrors.length ? ` ${importErrors.join(" | ")}` : "";
+    setMessage(result.message + details, importErrors.length > 0);
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#deck-export-button").addEventListener("click", async () => {
+  const button = $("#deck-export-button");
+  button.disabled = true;
+  try {
+    const result = await api("/api/deck-editor/export", { deck_ids: [...ui.deckExportSelection] });
+    const content = JSON.stringify(result.document, null, 2);
+    if (window.pywebview?.api?.save_deck_export) {
+      const saved = await window.pywebview.api.save_deck_export(content, result.filename);
+      if (saved?.cancelled) return;
+      if (!saved?.ok) throw new Error(saved?.message || "Esportazione non riuscita.");
+      setMessage(`Deck esportati in ${saved.path}`);
+    } else {
+      const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+      const link = document.createElement("a");
+      const downloadUrl = URL.createObjectURL(blob);
+      link.href = downloadUrl;
+      link.download = result.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      setMessage("Esportazione deck completata.");
+    }
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    updateDeckExportControls();
+  }
+});
 $("#deck-search").addEventListener("input", renderDeckLists);
 $("#deck-type-filter").addEventListener("change", renderDeckLists);
 $("#deck-expansion-filter").addEventListener("change", renderDeckLists);
@@ -1123,6 +1225,10 @@ $("#deck-save-button").addEventListener("click", async () => {
   try {
     const result = await api("/api/deck-editor/save", deckPayload());
     ui.deckEditor = result.editor;
+    ui.config = result.config;
+    if (!result.config.decks.some(deck => deck.id === ui.options?.default_deck)) {
+      ui.options.default_deck = result.config.defaults.player_deck;
+    }
     refreshDeckSelects(result.config);
     populateDeckEditorFilters();
     loadDeckDraft(result.editor.decks.find(deck => deck.id === result.deck.id));
@@ -1140,6 +1246,10 @@ $("#deck-delete-button").addEventListener("click", async () => {
   try {
     const result = await api("/api/deck-editor/delete", { id: ui.deckDraft.id });
     ui.deckEditor = result.editor;
+    ui.config = result.config;
+    if (!result.config.decks.some(deck => deck.id === ui.options?.default_deck)) {
+      ui.options.default_deck = result.config.defaults.player_deck;
+    }
     refreshDeckSelects(result.config);
     populateDeckEditorFilters();
     loadDeckDraft();
@@ -1426,7 +1536,7 @@ function updateSetupMode() {
 function onlineProfile() {
   return {
     player_name: ui.options?.username || $("#player-name").value,
-    player_deck: ui.options?.default_deck || $("#player-deck").value,
+    player_deck: preferredDeckId() || $("#player-deck").value,
     chain_enabled: ui.options?.chain_enabled !== false
   };
 }
@@ -1454,7 +1564,7 @@ function renderRoom(status) {
   const choosingDeck = status.phase === "deck_select" && ["player1", "player2"].includes(status.player_role);
   $("#online-deck-choice").hidden = !choosingDeck;
   if (choosingDeck && previousPhase !== "deck_select") {
-    $("#online-player-deck").value = ui.options?.default_deck || ui.config.defaults.player_deck;
+    $("#online-player-deck").value = preferredDeckId() || ui.config.defaults.player_deck;
   }
   $("#proceed-room").hidden = !(status.is_host && status.phase === "waiting");
   const playersReady = [p1, p2].every(player => player?.ready);
@@ -1656,7 +1766,7 @@ function openMatchSetup(mode) {
   $("#main-menu-dialog").close();
   $("#game-mode").value = mode;
   $("#player-name").value = ui.options.username;
-  $("#player-deck").value = ui.options.default_deck;
+  $("#player-deck").value = preferredDeckId();
   updateSetupMode();
   $("#setup-dialog").showModal();
 }
@@ -1677,7 +1787,7 @@ function openOptions(returnTo = "main") {
   if ($("#main-menu-dialog").open) $("#main-menu-dialog").close();
   if ($("#online-browser-dialog").open) $("#online-browser-dialog").close();
   $("#option-username").value = ui.options.username;
-  $("#option-default-deck").value = ui.options.default_deck;
+  $("#option-default-deck").value = preferredDeckId();
   $("#option-default-chain").value = ui.options.chain_enabled === false ? "off" : "on";
   $("#options-dialog").showModal();
 }
@@ -1753,11 +1863,14 @@ async function boot() {
     ]);
     ui.config = config;
     ui.options = options;
+    if (!config.decks.some(deck => deck.id === ui.options.default_deck)) {
+      ui.options.default_deck = config.defaults.player_deck;
+    }
     refreshDeckSelects(config);
     $("#player-name").value = options.username;
-    $("#player-deck").value = options.default_deck;
-    $("#online-player-deck").value = options.default_deck;
-    $("#option-default-deck").value = options.default_deck;
+    $("#player-deck").value = ui.options.default_deck;
+    $("#online-player-deck").value = ui.options.default_deck;
+    $("#option-default-deck").value = ui.options.default_deck;
     $("#option-default-chain").value = options.chain_enabled === false ? "off" : "on";
     updateSetupMode();
     if (data.game) {

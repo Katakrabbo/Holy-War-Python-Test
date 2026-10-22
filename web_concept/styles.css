@@ -2140,6 +2140,42 @@ dialog li {
   padding: 6px 9px;
 }
 
+.deck-transfer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.deck-transfer-actions .button {
+  min-width: 0;
+  padding: 7px 5px;
+  font-size: .64rem;
+}
+
+.deck-select-all {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: .65rem;
+  cursor: pointer;
+}
+
+.deck-saved-entry-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.deck-export-checkbox {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--gold-2);
+}
+
 .deck-saved-list {
   min-height: 0;
   display: grid;
