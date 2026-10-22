@@ -14,7 +14,12 @@ SCRIPT = {
         },
         {
             "trigger": {"event": "on_my_turn_end", "frequency": "each_turn"},
-            "target": {"type": "cards_controlled_by_owner", "zone": "field", "owner": "me"},
+            "target": {
+                "type": "cards_controlled_by_owner",
+                "zone": "field",
+                "owner": "me",
+                "card_filter": {"name_equals": "Spirito Vacuo", "card_type_in": ["token"]},
+            },
             "effect": {"action": "calice_endturn"}
         }
     ],

@@ -306,7 +306,7 @@ class WebGameSession:
             self.rng = random.Random(self.seed)
             self.ai_steps = 0
             self.chain_active = False
-            self._chain_enabled = [True, True]
+            self._chain_enabled = [bool(payload.get("chain_enabled", True)), True]
             self.chain_participants = []
             self.chain_priority_idx = 0
             self.chain_pass_count = 0
@@ -1430,6 +1430,23 @@ class WebGameSession:
                 return self._run_and_snapshot(self.engine.start_turn)
             if state.winner is not None:
                 return self.snapshot(ok=False, message="La partita è terminata.")
+            if kind == "surrender":
+                # Resigning is always legal, even during the opponent's turn
+                # or while the opponent owns chain priority.
+                if network_actor_idx is not None:
+                    if self.mode != "online" or network_actor_idx not in {0, 1}:
+                        return self.snapshot(ok=False, message="Identita giocatore di rete non valida.")
+                    surrendering_idx = network_actor_idx
+                elif self.mode == "local":
+                    surrendering_idx = state.active_player
+                else:
+                    surrendering_idx = 0
+                state.winner = 1 - surrendering_idx
+                state.log(
+                    f"{state.players[surrendering_idx].name} si arrende. "
+                    f"Vince {state.players[state.winner].name}."
+                )
+                return self.snapshot(message="Hai abbandonato la partita.")
             expected_actor_idx = self.chain_priority_idx if self.chain_active else state.active_player
             if network_actor_idx is not None:
                 if self.mode != "online" or network_actor_idx not in {0, 1}:
@@ -1525,14 +1542,6 @@ class WebGameSession:
 
                 return self._run_and_snapshot(finish_turn)
 
-            if kind == "surrender":
-                state.winner = 1 - actor_idx
-                state.log(
-                    f"{state.players[actor_idx].name} si arrende. "
-                    f"Vince {state.players[1 - actor_idx].name}."
-                )
-                return self.snapshot(message="Hai abbandonato la partita.")
-
             return self.snapshot(ok=False, message="Azione sconosciuta.")
 
     def _start_next_turn(self) -> None:
@@ -1586,7 +1595,7 @@ class WebGameSession:
 class HolyWarRequestHandler(SimpleHTTPRequestHandler):
     session: WebGameSession
     multiplayer: MultiplayerService
-    user_settings: dict[str, str]
+    user_settings: dict[str, Any]
     user_settings_path: Path
 
     def __init__(self, *args: Any, directory: str, **kwargs: Any) -> None:
@@ -1657,8 +1666,13 @@ class HolyWarRequestHandler(SimpleHTTPRequestHandler):
             if path == "/api/options":
                 username = str(payload.get("username") or "Pellegrino").strip()[:28] or "Pellegrino"
                 default_deck = str(payload.get("default_deck") or DEFAULT_PLAYER_DECK).strip()
+                chain_enabled = bool(payload.get("chain_enabled", True))
                 self.session._deck_religion(default_deck)
-                self.user_settings.update({"username": username, "default_deck": default_deck})
+                self.user_settings.update({
+                    "username": username,
+                    "default_deck": default_deck,
+                    "chain_enabled": chain_enabled,
+                })
                 self.user_settings_path.parent.mkdir(parents=True, exist_ok=True)
                 self.user_settings_path.write_text(
                     json.dumps(self.user_settings, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -1806,12 +1820,20 @@ def _run() -> None:
     session = WebGameSession(Path(args.cards_json), seed=args.seed, autoload=False)
     multiplayer = MultiplayerService(session)
     settings_path = appdata_dir() / "options.json"
-    user_settings = {"username": "Pellegrino", "default_deck": DEFAULT_PLAYER_DECK}
+    user_settings: dict[str, Any] = {
+        "username": "Pellegrino",
+        "default_deck": DEFAULT_PLAYER_DECK,
+        "chain_enabled": True,
+    }
     if settings_path.is_file():
         try:
             loaded_settings = json.loads(settings_path.read_text(encoding="utf-8"))
             if isinstance(loaded_settings, dict):
-                user_settings.update({key: str(value) for key, value in loaded_settings.items() if key in user_settings})
+                for key in ("username", "default_deck"):
+                    if key in loaded_settings:
+                        user_settings[key] = str(loaded_settings[key])
+                if "chain_enabled" in loaded_settings:
+                    user_settings["chain_enabled"] = bool(loaded_settings["chain_enabled"])
         except (OSError, ValueError, TypeError):
             pass
 

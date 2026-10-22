@@ -102,6 +102,26 @@ def test_online_action_rejects_player_without_priority() -> None:
     assert "avversario" in response["message"].lower()
 
 
+def test_online_player_can_surrender_during_opponents_turn() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    session.new_game({"mode": "online"})
+    assert session.engine is not None
+    session.engine.state.active_player = 0
+
+    response = session.action({"type": "surrender"}, network_actor_idx=1)
+
+    assert response["ok"] is True
+    assert response["game"]["winner"] == 0
+
+
+def test_new_game_uses_the_saved_chain_default() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+
+    response = session.new_game({"mode": "online", "chain_enabled": False})
+
+    assert response["game"]["chain"]["enabled"] is False
+
+
 def test_online_host_uses_assigned_player_two_during_preparation() -> None:
     session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
     session.new_game({"mode": "online"})
@@ -461,6 +481,188 @@ def test_campana_gains_turn_counter_and_spends_chosen_amount_to_buff_all_saints(
     assert "campana_counter:1" in campana.blessed
     assert saint.current_faith == faith_before + 2
     assert player.inspiration + player.temporary_inspiration == inspiration_before
+
+
+def test_calice_insanguinato_destroys_only_spiriti_vacui_at_end_turn() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_attack=["Araldo della Fine", "Spirito Vacuo"],
+        player_artifacts=["Calice Insanguinato"],
+    )
+    payload["initial_draw"] = False
+    payload["players"][0]["defense"] = [None, "Spirito Vacuo"]
+    payload["players"][0]["sin"] = 5
+    session.start_test_game(payload)
+    assert session.engine is not None
+    engine = session.engine
+    owner = engine.state.players[0]
+    opponent = engine.state.players[1]
+    ordinary_uid = owner.attack[0]
+    spirit_uids = {
+        uid
+        for uid in owner.attack + owner.defense
+        if uid and engine.state.instances[uid].definition.name == "Spirito Vacuo"
+    }
+
+    session.action({"type": "end_turn"})
+
+    assert ordinary_uid in owner.attack + owner.defense
+    assert all(uid not in owner.attack + owner.defense for uid in spirit_uids)
+    assert opponent.sin == 5 * len(spirit_uids)
+
+
+def test_field_trigger_unbinds_when_caverna_profonda_returns_to_relicario() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_attack=["Pietra Focaia", "Pietra Levigata"],
+        player_artifacts=["Caverna Profonda"],
+    )
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+    engine = session.engine
+    player = engine.state.players[0]
+    caverna_uid = player.artifacts[0]
+    first_stone, second_stone = player.attack[:2]
+    assert caverna_uid and first_stone and second_stone
+
+    engine.send_to_graveyard(0, first_stone)
+    assert first_stone in player.deck
+    assert first_stone not in player.graveyard
+
+    assert runtime_cards._move_uid_to_zone(engine, caverna_uid, "relicario", 0)  # noqa: SLF001
+    engine.send_to_graveyard(0, second_stone)
+
+    assert caverna_uid in player.deck
+    assert second_stone in player.graveyard
+    assert second_stone not in player.deck
+
+
+def test_source_bound_bonus_ends_when_its_permanent_leaves_the_field() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_attack=["Albero Sacro"],
+        player_artifacts=["Corteccia"],
+    )
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+    engine = session.engine
+    target_uid = engine.state.players[0].attack[0]
+    source_uid = engine.state.players[0].artifacts[0]
+    assert target_uid and source_uid
+    original_faith = engine.state.instances[target_uid].current_faith
+
+    runtime_cards._apply_effect(  # noqa: SLF001
+        engine,
+        0,
+        source_uid,
+        [target_uid],
+        EffectSpec(action="increase_faith", amount=5, duration="until_source_leaves"),
+    )
+    assert engine.state.instances[target_uid].current_faith == original_faith + 5
+
+    assert runtime_cards._move_uid_to_zone(engine, source_uid, "relicario", 0)  # noqa: SLF001
+
+    assert engine.state.instances[target_uid].current_faith == original_faith
+
+
+def test_saint_target_filters_also_accept_tokens() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        opponent_attack=["Token Sacrificale"],
+    )
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+    token_uid = session.engine.state.players[1].attack[0]
+    assert token_uid is not None
+
+    # The global Santo semantics include Tokens even when a legacy card script
+    # lists only "santo" in its filter.
+    saint_only = TargetSpec(type="cards_controlled_by_owner", owner="opponent", zone="field")
+    saint_only.card_filter.card_type_in = ["santo"]
+    assert token_uid in runtime_cards._collect_selectable_targets_for_manual_target(  # noqa: SLF001
+        session.engine, 0, saint_only
+    )
+
+
+def test_sacrificio_naturale_tokens_advance_into_empty_front_slots() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(mode="local", active_player=0)
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+    engine = session.engine
+    source_uid = engine.state.players[0].deck[0]
+
+    runtime_cards._apply_effect(  # noqa: SLF001
+        engine,
+        0,
+        source_uid,
+        [source_uid],
+        EffectSpec(
+            action="summon_generated_token",
+            card_name="Token Sacrificale",
+            amount=3,
+            owner="opponent",
+            zone="defense",
+        ),
+    )
+
+    opponent = engine.state.players[1]
+    assert all(uid is not None for uid in opponent.attack)
+    assert opponent.defense == [None, None, None]
+    assert all(engine.state.instances[uid].definition.name == "Token Sacrificale" for uid in opponent.attack if uid)
+
+
+def test_anfibio_tossico_equips_to_a_token_damaged_in_battle() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_attack=["Anfibio Tossico"],
+        opponent_attack=["Token Sacrificale"],
+    )
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+    engine = session.engine
+    anfibio_uid = engine.state.players[0].attack[0]
+    token_uid = engine.state.players[1].attack[0]
+    assert anfibio_uid and token_uid
+
+    result = engine.attack(0, 0, 0)
+
+    assert result.ok is True
+    assert anfibio_uid not in engine.state.players[0].attack + engine.state.players[0].defense
+    assert f"equipped_to:{token_uid}" in engine.state.instances[anfibio_uid].blessed
+    assert f"equipped_by:{anfibio_uid}" in engine.state.instances[token_uid].blessed
+
+
+def test_aquila_vorace_can_declare_a_normal_attack() -> None:
+    session = WebGameSession(Path("holywar/data/cards.json"), seed=11)
+    payload = _draw_control_test_payload(
+        mode="local",
+        active_player=0,
+        player_attack=["Aquila Vorace"],
+    )
+    payload["initial_draw"] = False
+    session.start_test_game(payload)
+    assert session.engine is not None
+
+    result = session.engine.attack(0, 0, None)
+
+    assert result.ok is True
+    assert session.engine.state.instances[session.engine.state.players[0].attack[0]].exhausted is True
 
 
 def test_ptah_prompts_with_only_cards_drawn_this_turn_and_replaces_one() -> None:

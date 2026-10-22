@@ -1816,6 +1816,5 @@ class RuntimeEffectsMixin(
                 continue
             if source_inst is not None and marker not in source_inst.blessed:
                 source_inst.blessed.append(marker)
-            engine._emit_event("on_this_card_leaves_field", owner, card=uid, destination="hand")
 
     # This method checks if a given event context matches the specified conditions for an effect. It evaluates the conditions recursively, allowing for complex logical structures using "all_of", "any_of", and "not". If the conditions are met, it returns True; otherwise, it returns False.

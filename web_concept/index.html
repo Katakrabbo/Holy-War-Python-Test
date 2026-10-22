@@ -237,6 +237,7 @@
       <button class="button button-quiet" id="menu-deck-editor" type="button">Deck Editor</button>
       <button class="button button-quiet" id="menu-test-field" type="button">Test Field</button>
       <button class="button button-quiet" id="menu-options" type="button">Opzioni</button>
+      <button class="button button-quiet" id="menu-bug-report" type="button">Segnala un bug</button>
       <button class="button button-danger" id="menu-close" type="button">Chiudi</button>
     </div>
   </dialog>
@@ -249,6 +250,8 @@
     <div class="browser-toolbar">
       <button class="button button-primary" id="open-host-room" type="button">Hosta partita</button>
       <button class="button button-quiet" id="refresh-rooms" type="button">Aggiorna</button>
+      <button class="button button-quiet" id="online-browser-options" type="button">Opzioni</button>
+      <button class="button button-quiet" id="online-browser-bug-report" type="button">Segnala un bug</button>
     </div>
     <p class="online-status" id="browser-status">Ricerca delle stanze in corso...</p>
     <div class="room-list" id="room-list"></div>
@@ -298,6 +301,7 @@
       <p class="eyebrow">IMPOSTAZIONI</p><h2>Opzioni</h2>
       <label class="setup-field"><span>Nome utente</span><input id="option-username" maxlength="28" required></label>
       <label class="setup-field"><span>Deck predefinito</span><select id="option-default-deck"></select></label>
+      <label class="setup-field"><span>Catena predefinita</span><select id="option-default-chain"><option value="on">ON</option><option value="off">OFF</option></select></label>
       <div class="confirm-actions"><button class="button button-quiet" id="cancel-options" type="button">Annulla</button><button class="button button-primary" type="submit">Salva</button></div>
     </form>
   </dialog>
@@ -541,7 +545,7 @@
     <p class="pause-hint">Premi <kbd>ESC</kbd> per tornare al duello.</p>
     <div class="pause-actions">
       <button class="button button-primary" id="resume-button" type="button">Riprendi partita</button>
-      <button class="button button-quiet" id="new-game-button" type="button">Nuova partita</button>
+      <button class="button button-quiet" id="new-game-button" type="button">Torna al menu principale</button>
       <button class="button button-quiet" id="pause-deck-editor-button" type="button">Deck Editor</button>
       <button class="button button-quiet" id="pause-help-button" type="button">Guida del campo</button>
       <button class="button button-quiet" id="pause-log-button" type="button">Log partita</button>

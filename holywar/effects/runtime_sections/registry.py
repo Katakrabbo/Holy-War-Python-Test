@@ -450,11 +450,12 @@ class RuntimeRegistryMixin:
 
     # This method tracks the subscription of the game engine to prevent duplicate bindings for card scripts. It uses a set to keep track of the IDs of engines that have already been subscribed. If the engine's ID is already in the set, it means that the engine has already been subscribed, and the method returns without doing anything. If the engine's ID is not in the set, it adds the ID to the set, indicating that the engine is now subscribed. This mechanism helps to ensure that event handlers for card scripts are not registered multiple times for the same engine, which could lead to unintended behavior during gameplay.
     def _ensure_leave_subscription(self, engine: "GameEngine") -> None:
-        """Track engine subscription to prevent duplicate bindings."""
+        """Subscribe once to the lifecycle event that removes field effects."""
         engine_id = id(engine)
         if engine_id in self._subscribed_engines:
             return
         self._subscribed_engines.add(engine_id)
+        engine.rules_api(0).subscribe("on_this_card_leaves_field", self._on_source_leaves_field)
 
     # This method checks if a given card name has a corresponding card script that has been migrated to the registry. It normalizes the card name and checks if it exists in the `_scripts` dictionary. If the normalized card name is found in the registry, it returns True, indicating that the card has been migrated; otherwise, it returns False. This method can be used to verify whether a card's script has been properly registered in the new format during the migration process.
     def is_migrated(self, card_name: str) -> bool:

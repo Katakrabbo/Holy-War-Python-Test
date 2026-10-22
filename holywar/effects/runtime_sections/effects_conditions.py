@@ -154,7 +154,8 @@ class RuntimeEffectsConditionsMixin:
             if inst is None:
                 return False
             allowed_types = {_norm(v) for v in ctype_in}
-            if _norm(inst.definition.card_type) not in allowed_types:
+            event_type = _norm(inst.definition.card_type)
+            if event_type not in allowed_types and not (event_type == "token" and "santo" in allowed_types):
                 return False
 
         turn_scope = _norm(str(condition.get("turn_scope", "")))
@@ -392,7 +393,10 @@ class RuntimeEffectsConditionsMixin:
                 return False
             selected_inst = ctx.engine.state.instances[selected_uid]
             allowed_types = {_norm(str(v)) for v in list(selected_target_card_type_in or [])}
-            if allowed_types and _norm(selected_inst.definition.card_type) not in allowed_types:
+            selected_type = _norm(selected_inst.definition.card_type)
+            if allowed_types and selected_type not in allowed_types and not (
+                selected_type == "token" and "santo" in allowed_types
+            ):
                 return False
         selected_target_startswith = condition.get("selected_target_startswith")
         if selected_target_startswith:
@@ -425,7 +429,10 @@ class RuntimeEffectsConditionsMixin:
                 return False
 
             type_filter = {_norm(v) for v in list(filt.get("card_type_in", []) or [])}
-            if type_filter and _norm(inst.definition.card_type) not in type_filter:
+            stored_type = _norm(inst.definition.card_type)
+            if type_filter and stored_type not in type_filter and not (
+                stored_type == "token" and "santo" in type_filter
+            ):
                 return False
 
         opp = 1 - owner_idx

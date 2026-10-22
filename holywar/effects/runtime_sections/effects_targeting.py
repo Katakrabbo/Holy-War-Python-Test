@@ -134,6 +134,12 @@ class RuntimeEffectsTargetingMixin:
             source_uid = str(engine.state.flags.get("_runtime_event_source", ""))
             if source_uid:
                 pool.append(source_uid)
+        elif ttype == "payload_target_card":
+            # Combat events expose the struck card as ``target``.  Keep this
+            # distinct from ``event_card`` (the attacker/source card).
+            target_uid = str(engine.state.flags.get("_runtime_event_target", ""))
+            if target_uid:
+                pool.append(target_uid)
         elif ttype == "equipped_target_of_source":
             source_uid = str(engine.state.flags.get("_runtime_source_card", "")).strip()
             if source_uid:
@@ -508,6 +514,15 @@ class RuntimeEffectsTargetingMixin:
         from_zone = engine._locate_uid_zone(real_owner, uid)
         leaving_field = from_zone in {"attack", "defense", "artifact", "building"}
 
+        def finish_field_departure(destination: str) -> None:
+            if leaving_field:
+                engine._emit_event(
+                    "on_this_card_leaves_field",
+                    real_owner,
+                    card=uid,
+                    destination=destination,
+                )
+
         # The following block handles moving the card to the hand zone. It checks if the card is already in the player's hand, and if not, it checks if there is space in the hand (not exceeding MAX_HAND). If there is space, it removes the card from all other zones and adds it to the player's hand. If the card is leaving the field, it also resets its runtime state. This ensures that the card is properly moved to the hand while respecting game rules such as hand size limits.
         if zone == "hand":
             if uid in player.hand:
@@ -518,6 +533,7 @@ class RuntimeEffectsTargetingMixin:
             if leaving_field:
                 engine._reset_card_runtime_state(uid)
             player.hand.append(uid)
+            finish_field_departure("hand")
             return True
 
         # For other zones (deck, graveyard, excommunicated, field), the method removes the card from all other zones and adds it to the target zone. If the card is leaving the field, it resets its runtime state. The method returns True if the move was successful and False if it was not possible (e.g., if trying to move a card to an unsupported zone).
@@ -543,11 +559,13 @@ class RuntimeEffectsTargetingMixin:
                 else:
                     player.graveyard.insert(0, player.graveyard.pop(player.graveyard.index(uid)))
                 _shuffle_graveyard_if_promise_active()
+                finish_field_departure("graveyard")
                 return True
             if uid not in player.deck:
                 player.deck.insert(0, uid)
             else:
                 player.deck.insert(0, player.deck.pop(player.deck.index(uid)))
+            finish_field_departure("relicario")
             return True
 
         # For the relicario zone, it treats it the same as the deck, adding the card to the bottom if it's not already there. This allows for effects that move cards to the relicario to function similarly to moving cards to the deck, while still keeping them in a separate zone for game mechanics purposes.
@@ -558,9 +576,11 @@ class RuntimeEffectsTargetingMixin:
                 if uid not in player.graveyard:
                     player.graveyard.append(uid)
                 _shuffle_graveyard_if_promise_active()
+                finish_field_departure("graveyard")
                 return True
             if uid not in player.deck:
                 player.deck.append(uid)
+            finish_field_departure("relicario")
             return True
 
         # The following block handles moving the card to the graveyard. If the card is not already in the graveyard, it adds it to the graveyard. This allows for effects that move cards to the graveyard to function properly, ensuring that the card is placed in the correct zone for game mechanics purposes.
@@ -568,12 +588,14 @@ class RuntimeEffectsTargetingMixin:
             if uid not in player.graveyard:
                 player.graveyard.append(uid)
             _shuffle_graveyard_if_promise_active()
+            finish_field_departure("graveyard")
             return True
 
         # The following block handles moving the card to the excommunicated zone. If the card is not already in the excommunicated zone, it adds it to that zone. This allows for effects that move cards to the excommunicated zone to function properly, ensuring that the card is placed in the correct zone for game mechanics purposes.
         if zone == "excommunicated":
             if uid not in player.excommunicated:
                 player.excommunicated.append(uid)
+            finish_field_departure("excommunicated")
             return True
 
         return False
@@ -658,7 +680,19 @@ class RuntimeEffectsTargetingMixin:
 
         # The following block determines where to place the summoned token based on the preferred zone and available space. If the preferred zone is defense, it first tries to find an open slot in the defense zone, and if none are available, it tries the attack zone. If the preferred zone is attack, it first tries the attack zone, and if none are available, it tries the defense zone. If no preferred zone is specified, it defaults to trying the attack zone first and then the defense zone. If there is no space in either zone, it logs a message indicating that there is no space to summon the token and returns None.
         if slot is None and preferred == "defense":
-            slot = engine._first_open(player.defense)
+            # Prefer a rear slot whose front is also empty.  Placement then
+            # promotes the summoned unit immediately instead of repeatedly
+            # filling the same lane behind the first promoted token.
+            slot = next(
+                (
+                    index
+                    for index, defense_uid in enumerate(player.defense)
+                    if defense_uid is None and index < len(player.attack) and player.attack[index] is None
+                ),
+                None,
+            )
+            if slot is None:
+                slot = engine._first_open(player.defense)
             zone = "defense"
             if slot is None:
                 slot = engine._first_open(player.attack)
@@ -703,6 +737,10 @@ class RuntimeEffectsTargetingMixin:
             player.attack[slot] = new_uid
         else:
             player.defense[slot] = new_uid
+            # A unit summoned behind an empty corresponding front slot moves
+            # to the front immediately, exactly like every other placement.
+            from holywar.core.zones import promote_defense_frontline
+            promote_defense_frontline(engine, owner_idx)
 
         inst = engine.state.instances[new_uid]
         inst.exhausted = False

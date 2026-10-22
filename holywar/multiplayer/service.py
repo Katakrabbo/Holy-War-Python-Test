@@ -39,7 +39,7 @@ class MultiplayerService:
         self.phase = "offline"
         self.message = "Multiplayer non connesso."
         self.members: list[str] = []
-        self.local_profile: dict[str, str] = {}
+        self.local_profile: dict[str, Any] = {}
         self.profiles: dict[str, dict[str, Any]] = {}
         self.room_name = ""
         self._password = ""
@@ -73,10 +73,11 @@ class MultiplayerService:
         self.worker.start()
 
     @staticmethod
-    def _profile(payload: dict[str, Any]) -> dict[str, str]:
+    def _profile(payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "name": str(payload.get("player_name") or "Pellegrino").replace("|", " ").strip()[:28] or "Pellegrino",
             "deck": str(payload.get("player_deck") or "").strip(),
+            "chain_enabled": bool(payload.get("chain_enabled", True)),
         }
 
     def find_lobbies(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -114,7 +115,13 @@ class MultiplayerService:
             self.remote_snapshot = None
             self.rematch_votes.clear()
             self.profiles = {
-                self.user_id: {"name": profile["name"], "role": None, "deck": "", "ready": False}
+                self.user_id: {
+                    "name": profile["name"],
+                    "role": None,
+                    "deck": "",
+                    "ready": False,
+                    "chain_enabled": bool(profile.get("chain_enabled", True)),
+                }
             } if self.user_id else {}
             return self.status()
 
@@ -137,6 +144,7 @@ class MultiplayerService:
             self.room_name = str(payload.get("room_name") or "")
             self.password_protected = bool(payload.get("password_protected"))
             self.remote_snapshot = None
+            self.rematch_votes.clear()
             if not self.owner_id:
                 bridge_status = dict(self.bridge.request("status") or {})
                 self.owner_id = str(bridge_status.get("ownerId") or "")
@@ -268,7 +276,15 @@ class MultiplayerService:
         if len(players) != 2 or any(not self.profiles[uid].get("deck") for uid in players):
             raise ValueError("Entrambi i giocatori devono confermare il mazzo.")
         first, second = (self.profiles[uid] for uid in players)
-        self.session.new_game({"mode": "online", "player_name": first["name"], "player_deck": first["deck"], "opponent_name": second["name"], "opponent_deck": second["deck"]})
+        self.session.new_game({
+            "mode": "online",
+            "player_name": first["name"],
+            "player_deck": first["deck"],
+            "opponent_name": second["name"],
+            "opponent_deck": second["deck"],
+            "chain_enabled": bool(first.get("chain_enabled", True)),
+        })
+        self.session._chain_enabled[1] = bool(second.get("chain_enabled", True))  # noqa: SLF001
         self.phase, self.message = "playing", ("Rematch avviato." if rematch else "Partita online avviata.")
         self.rematch_votes.clear()
         self._update_listing("started")
@@ -477,6 +493,7 @@ class MultiplayerService:
                 "role": auto_role,
                 "deck": "",
                 "ready": False,
+                "chain_enabled": bool(profile.get("chain_enabled", True)),
             }
             self.message = "Un giocatore e entrato nella stanza."
             self._broadcast_room()

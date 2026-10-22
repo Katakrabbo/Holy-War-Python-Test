@@ -403,6 +403,8 @@ def move_board_card_to_hand(engine: "GameEngine", owner_idx: int, uid: str) -> b
 
     if uid not in player.hand:
         player.hand.append(uid)
+    if was_on_field:
+        engine._emit_event("on_this_card_leaves_field", owner_idx, card=uid, destination="hand")
     return True
 
 

@@ -851,6 +851,7 @@ class RuntimeResolutionMixin:
                     ctx.payload.get("card", ctx.payload.get("saint", ctx.payload.get("token", "")))
                 )
                 ctx.engine.state.flags["_runtime_event_source"] = str(ctx.payload.get("source", ""))
+                ctx.engine.state.flags["_runtime_event_target"] = str(ctx.payload.get("target", ""))
                 ctx.engine.state.flags["_runtime_event_amount"] = str(ctx.payload.get("amount", ""))
                 ctx.engine.state.flags["_runtime_event_controller"] = str(
                     ctx.payload.get("controller", ctx.player_idx)
@@ -906,6 +907,7 @@ class RuntimeResolutionMixin:
                 finally:
                     ctx.engine.state.flags.pop("_runtime_event_card", None)
                     ctx.engine.state.flags.pop("_runtime_event_source", None)
+                    ctx.engine.state.flags.pop("_runtime_event_target", None)
                     ctx.engine.state.flags.pop("_runtime_event_amount", None)
                     ctx.engine.state.flags.pop("_runtime_event_controller", None)
                     ctx.engine.state.flags.pop("_runtime_event_name", None)
@@ -929,27 +931,11 @@ class RuntimeResolutionMixin:
             except Exception:
                 pass
 
-    # This method ensures that the engine is subscribed to the "on_this_card_leaves_field" event for the specified engine instance. It uses a set to keep track of which engines it has already subscribed to, preventing multiple subscriptions for the same engine. When the "on_this_card_leaves_field" event is triggered, it calls the `_on_source_leaves_field` method to handle any necessary cleanup and unbinding of triggers for the card that is leaving the field.
-    def _ensure_leave_subscription(self, engine: GameEngine) -> None:
-        key = id(engine)
-        if key in self._subscribed_engines:
-            return
-        self._subscribed_engines.add(key)
-        engine.rules_api(0).subscribe("on_this_card_leaves_field", self._on_source_leaves_field)
-
     # This method is called when a card that has triggers bound to it leaves the field. It retrieves the source UID from the event context and checks if the source instance still exists in the game state. If it does, it unbinds the triggers associated with that source UID for both players (owner index 0 and 1). It also manages any temporary buffs or effects that were applied by the source card, ensuring that they are properly removed when the card leaves the field. This method is crucial for maintaining the integrity of the game state and preventing any lingering effects from cards that are no longer active on the field.
     def _on_source_leaves_field(self, ctx: RuleEventContext) -> None:
         source_uid = str(ctx.payload.get("card", ""))
-        owner_idx = -1
-        inst = ctx.engine.state.instances.get(source_uid)
-        if inst is not None:
-            owner_idx = inst.owner
-
-        if owner_idx in (0, 1):
-            self.on_leave_unbind_triggers(ctx.engine, owner_idx, source_uid)
-            if not source_uid:
-                    return
-
+        if not source_uid:
+            return
         owner_idx = -1
         inst = ctx.engine.state.instances.get(source_uid)
         if inst is not None:
@@ -1161,7 +1147,8 @@ class RuntimeResolutionMixin:
                     stored_name = _norm(str(raw_stored))
                 if stored_name and stored_name in name_variants:
                     continue
-            if type_filter and _norm(inst.definition.card_type) not in type_filter:
+            card_type = _norm(inst.definition.card_type)
+            if type_filter and card_type not in type_filter and not (card_type == "token" and "santo" in type_filter):
                 continue
             if (
                 target.card_filter.exclude_buildings_if_my_building_zone_occupied

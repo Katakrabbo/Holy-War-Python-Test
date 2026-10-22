@@ -1006,7 +1006,6 @@ class RuntimeEffectsCombatMixin:
                     if not engine.move_board_card_to_hand(owner, uid):
                         continue
                     self._effect_usage_consume(engine, owner_idx, source_uid, effect)
-                    engine._emit_event("on_this_card_leaves_field", owner, card=uid, destination="hand")
                 return True
             if action == "send_to_graveyard":
                 for t_uid in targets:
@@ -1126,7 +1125,9 @@ class RuntimeEffectsCombatMixin:
                 return True
             if action == "calice_endturn":
                 destroyed = 0
-                for s_uid in list(engine.all_saints_on_field(owner_idx)):
+                for s_uid in list(targets):
+                    if s_uid not in engine.state.instances:
+                        continue
                     if self.is_immune_to_action(
                         engine.state.instances[s_uid].definition.name,
                         "calice_endturn_destroy",

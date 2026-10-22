@@ -25,7 +25,9 @@ const ui = {
   testStarted: false,
   config: null,
   options: null,
-  joinTarget: null
+  optionsReturnTo: "main",
+  joinTarget: null,
+  onlinePhase: null
 };
 
 const $ = selector => document.querySelector(selector);
@@ -867,10 +869,19 @@ $("#end-turn-button").addEventListener("click", () => sendAction({ type: "end_tu
 $("#chain-pass-button").addEventListener("click", () => sendAction({ type: "chain_pass" }));
 $("#chain-enable-button").addEventListener("click", () => sendAction({ type: "set_chain", enabled: true }));
 $("#chain-disable-button").addEventListener("click", () => sendAction({ type: "set_chain", enabled: false }));
-$("#new-game-button").addEventListener("click", () => {
-  $("#pause-dialog").close();
+async function returnToMainMenu() {
+  clearTimeout(ui.onlineTimer);
+  clearTimeout(ui.browserTimer);
+  if (ui.state?.mode === "online") {
+    try { await api("/api/multiplayer/leave", {}); } catch (_) { /* navigation must still work */ }
+  }
+  ["#pause-dialog", "#surrender-dialog", "#rematch-dialog", "#coin-toss-dialog", "#online-room-dialog", "#online-browser-dialog"]
+    .forEach(selector => { const dialog = $(selector); if (dialog?.open) dialog.close(); });
+  ui.onlineStateKey = null;
+  ui.onlinePhase = null;
   openMainMenu();
-});
+}
+$("#new-game-button").addEventListener("click", returnToMainMenu);
 
 function fillDeckSelect(select, decks, selectedId) {
   const groups = new Map();
@@ -1415,7 +1426,8 @@ function updateSetupMode() {
 function onlineProfile() {
   return {
     player_name: ui.options?.username || $("#player-name").value,
-    player_deck: ui.options?.default_deck || $("#player-deck").value
+    player_deck: ui.options?.default_deck || $("#player-deck").value,
+    chain_enabled: ui.options?.chain_enabled !== false
   };
 }
 
@@ -1426,6 +1438,8 @@ function openMainMenu() {
 }
 
 function renderRoom(status) {
+  const previousPhase = ui.onlinePhase;
+  ui.onlinePhase = status.phase;
   $("#online-room-title").textContent = status.room_name || "Stanza Holy War";
   $("#room-status").textContent = status.message || "In attesa...";
   const participants = status.participants || [];
@@ -1439,6 +1453,9 @@ function renderRoom(status) {
   $$('[data-room-role]').forEach(button => button.classList.toggle("selected", button.dataset.roomRole === status.player_role));
   const choosingDeck = status.phase === "deck_select" && ["player1", "player2"].includes(status.player_role);
   $("#online-deck-choice").hidden = !choosingDeck;
+  if (choosingDeck && previousPhase !== "deck_select") {
+    $("#online-player-deck").value = ui.options?.default_deck || ui.config.defaults.player_deck;
+  }
   $("#proceed-room").hidden = !(status.is_host && status.phase === "waiting");
   const playersReady = [p1, p2].every(player => player?.ready);
   $("#start-online-match").hidden = !(status.is_host && status.phase === "deck_select");
@@ -1460,6 +1477,8 @@ async function pollOnline() {
     const status = await api("/api/multiplayer/status");
     if (status.phase === "rejected" || status.phase === "return_browser") {
       const message = status.message;
+      if ($("#rematch-dialog").open) $("#rematch-dialog").close();
+      if ($("#surrender-dialog").open) $("#surrender-dialog").close();
       await api("/api/multiplayer/leave", {});
       hideGameScreen();
       if ($("#online-room-dialog").open) $("#online-room-dialog").close();
@@ -1480,6 +1499,8 @@ async function pollOnline() {
       }
       if (status.rematch_required && status.rematch_vote == null && !$("#rematch-dialog").open) {
         $("#rematch-dialog").showModal();
+      } else if ((!status.rematch_required || status.rematch_vote != null) && $("#rematch-dialog").open) {
+        $("#rematch-dialog").close();
       }
     }
     if (status.connected) ui.onlineTimer = setTimeout(pollOnline, 650);
@@ -1546,6 +1567,7 @@ async function leaveOnlineRoom() {
   hideGameScreen();
   clearTimeout(ui.onlineTimer);
   ui.onlineStateKey = null;
+  ui.onlinePhase = null;
   if ($("#online-room-dialog").open) $("#online-room-dialog").close();
   if (!$("#online-browser-dialog").open) $("#online-browser-dialog").showModal();
   refreshRooms();
@@ -1589,7 +1611,8 @@ $("#setup-form").addEventListener("submit", async event => {
       player_name: $("#player-name").value,
       opponent_name: $("#opponent-name").value,
       player_deck: $("#player-deck").value,
-      opponent_deck: $("#opponent-deck").value
+      opponent_deck: $("#opponent-deck").value,
+      chain_enabled: ui.options?.chain_enabled !== false
     });
     ui.selectedUid = null;
     showGameScreen();
@@ -1609,8 +1632,9 @@ const surrenderDialog = $("#surrender-dialog");
 function openPause() {
   if ($('dialog[open]')) return;
   const online = ui.state?.mode === "online";
-  ["#new-game-button", "#pause-deck-editor-button", "#pause-help-button", "#pause-log-button", "#bug-report-button"]
-    .forEach(selector => $(selector).hidden = online);
+  ["#new-game-button", "#pause-help-button", "#pause-log-button", "#bug-report-button"]
+    .forEach(selector => $(selector).hidden = false);
+  $("#pause-deck-editor-button").hidden = online;
   $("#resume-button").textContent = online ? "Annulla" : "Riprendi partita";
   pauseDialog.showModal();
 }
@@ -1618,9 +1642,12 @@ $("#menu-button").addEventListener("click", openPause);
 $("#resume-button").addEventListener("click", () => pauseDialog.close());
 $("#pause-help-button").addEventListener("click", () => { pauseDialog.close(); helpDialog.showModal(); });
 $("#pause-log-button").addEventListener("click", () => { pauseDialog.close(); $("#match-log").focus(); });
-$("#bug-report-button").addEventListener("click", () => {
+function openBugReport() {
   window.open("https://forms.gle/c195nMKhR8WKRpP87", "_blank", "noopener,noreferrer");
-});
+}
+$("#bug-report-button").addEventListener("click", openBugReport);
+$("#menu-bug-report").addEventListener("click", openBugReport);
+$("#online-browser-bug-report").addEventListener("click", openBugReport);
 $("#surrender-button").addEventListener("click", () => surrenderDialog.showModal());
 $("#pause-surrender-button").addEventListener("click", () => { pauseDialog.close(); surrenderDialog.showModal(); });
 $("#confirm-surrender-button").addEventListener("click", () => { surrenderDialog.close(); sendAction({ type: "surrender" }); });
@@ -1645,18 +1672,37 @@ $("#online-browser-back").addEventListener("click", () => {
 });
 $("#menu-deck-editor").addEventListener("click", () => openDeckEditor($("#main-menu-dialog")));
 $("#menu-test-field").addEventListener("click", openTestGame);
-$("#menu-options").addEventListener("click", () => {
-  $("#main-menu-dialog").close();
+function openOptions(returnTo = "main") {
+  ui.optionsReturnTo = returnTo;
+  if ($("#main-menu-dialog").open) $("#main-menu-dialog").close();
+  if ($("#online-browser-dialog").open) $("#online-browser-dialog").close();
   $("#option-username").value = ui.options.username;
   $("#option-default-deck").value = ui.options.default_deck;
+  $("#option-default-chain").value = ui.options.chain_enabled === false ? "off" : "on";
   $("#options-dialog").showModal();
-});
-$("#cancel-options").addEventListener("click", () => { $("#options-dialog").close(); openMainMenu(); });
+}
+function closeOptions() {
+  $("#options-dialog").close();
+  if (ui.optionsReturnTo === "online") {
+    $("#online-browser-dialog").showModal();
+    refreshRooms();
+  } else {
+    openMainMenu();
+  }
+}
+$("#menu-options").addEventListener("click", () => openOptions("main"));
+$("#online-browser-options").addEventListener("click", () => openOptions("online"));
+$("#cancel-options").addEventListener("click", closeOptions);
 $("#options-form").addEventListener("submit", async event => {
   event.preventDefault();
   try {
-    ui.options = await api("/api/options", { username: $("#option-username").value, default_deck: $("#option-default-deck").value });
-    $("#options-dialog").close(); setMessage(ui.options.message); openMainMenu();
+    ui.options = await api("/api/options", {
+      username: $("#option-username").value,
+      default_deck: $("#option-default-deck").value,
+      chain_enabled: $("#option-default-chain").value === "on"
+    });
+    setMessage(ui.options.message);
+    closeOptions();
   } catch (error) { setMessage(error.message, true); }
 });
 $("#menu-close").addEventListener("click", () => $("#close-game-dialog").showModal());
@@ -1673,7 +1719,23 @@ $("#decline-rematch").addEventListener("click", () => voteRematch(false));
 $("#confirm-coin-toss").addEventListener("click", () => sendAction({ type: "confirm_coin_toss" }));
 $("#coin-toss-dialog").addEventListener("cancel", event => event.preventDefault());
 $("#main-menu-dialog").addEventListener("cancel", event => event.preventDefault());
-$("#online-room-dialog").addEventListener("cancel", event => event.preventDefault());
+$("#rematch-dialog").addEventListener("cancel", event => event.preventDefault());
+$("#online-browser-dialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  $("#online-browser-back").click();
+});
+$("#online-room-dialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  leaveOnlineRoom();
+});
+$("#setup-dialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  $("#setup-back-menu").click();
+});
+$("#options-dialog").addEventListener("cancel", event => {
+  event.preventDefault();
+  $("#cancel-options").click();
+});
 $("#close-inspector").addEventListener("click", () => $(".inspector").classList.remove("open"));
 $$('[data-close-dialog]').forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("keydown", event => {
@@ -1696,6 +1758,7 @@ async function boot() {
     $("#player-deck").value = options.default_deck;
     $("#online-player-deck").value = options.default_deck;
     $("#option-default-deck").value = options.default_deck;
+    $("#option-default-chain").value = options.chain_enabled === false ? "off" : "on";
     updateSetupMode();
     if (data.game) {
       render(data);
