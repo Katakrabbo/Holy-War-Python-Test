@@ -2141,9 +2141,9 @@
   },
   {
     "name": "Vasi Canopi",
-    "card_type": "Artefatto",
+    "card_type": "Benedizione",
     "crosses": "6",
-    "faith": 6,
+    "faith": null,
     "strength": null,
     "effect_text": "Equipaggia questa carta a un tuo Santo bersaglio. Quando quel Santo viene sconfitto, distruggi questa carta ed evoca quel Santo di nuovo sul tuo campo senza i suoi effetti.",
     "expansion": "EGI-1",

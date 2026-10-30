@@ -21,9 +21,9 @@ SCRIPT = {
             "effect": {"action": "destroy_card"},
         },
         {
-            "condition": {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
+            "condition": {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
             "target": {"type": "source_card"},
-            "effect": {"action": "add_seal_counter", "amount": 3},
+            "effect": {"action": "add_player_counter", "flag": "sigilli", "amount": 3},
         },
         {
             "target": {"type": "source_card"},

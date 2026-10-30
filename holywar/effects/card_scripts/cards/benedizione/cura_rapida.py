@@ -17,12 +17,12 @@ SCRIPT = {
                 "card_filter": {
                     "card_type_in": ["santo"],
                 },
-                "min_targets": 1,
+                "min_targets": 2,
                 "max_targets": 2,
             },
             "effect": {
                 "action": "increase_faith",
-                "amount": 6,
+                "amount": 3,
             },
         }
     ],

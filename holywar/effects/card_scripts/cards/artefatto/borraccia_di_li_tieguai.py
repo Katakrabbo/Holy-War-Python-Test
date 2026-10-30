@@ -12,6 +12,7 @@ BAXIAN_DESTROYED = {
 }
 
 SCRIPT = {
+    "counter_tag": "campana_counter",
     "on_play_mode": "scripted",
     "on_enter_mode": "auto",
     "on_activate_mode": "scripted",
@@ -22,7 +23,7 @@ SCRIPT = {
         {
             "trigger": {"event": "on_card_sent_to_graveyard", "frequency": "each_time", "condition": BAXIAN_DESTROYED},
             "target": {"type": "source_card"},
-            "effect": {"action": "campana_add_counter"},
+            "effect": {"action": "add_source_counter", "flag": "campana_counter"},
         }
     ],
     "on_play_actions": [],
@@ -38,7 +39,7 @@ SCRIPT = {
                         "value": "hand",
                         "condition": {
                             "all_of": [
-                                {"source_counter_gte": 2},
+                                {"source_counter_gte": {"key": "campana_counter", "amount": 2}},
                                 {
                                     "controller_has_cards": {
                                         "zone": "graveyard",
@@ -55,7 +56,7 @@ SCRIPT = {
                         "value": "summon",
                         "condition": {
                             "all_of": [
-                                {"source_counter_gte": 5},
+                                {"source_counter_gte": {"key": "campana_counter", "amount": 5}},
                                 {
                                     "controller_has_cards": {
                                         "zone": "graveyard",
@@ -71,22 +72,22 @@ SCRIPT = {
             }
         },
         {
-            "condition": {"all_of": [{"selected_option_in": ["hand"]}, {"source_counter_gte": 2}]},
+            "condition": {"all_of": [{"selected_option_in": ["hand"]}, {"source_counter_gte": {"key": "campana_counter", "amount": 2}}]},
             "target": {"type": "source_card"},
-            "effect": {"action": "campana_remove_counter", "amount": 2},
+            "effect": {"action": "remove_source_counter", "flag": "campana_counter", "amount": 2},
         },
         {
-            "condition": {"all_of": [{"selected_option_in": ["hand"]}, {"source_counter_gte": 2}]},
+            "condition": {"all_of": [{"selected_option_in": ["hand"]}, {"source_counter_gte": {"key": "campana_counter", "amount": 2}}]},
             "target": {"type": "selected_target", "zone": "graveyard", "owner": "me", "card_filter": {"name_contains": "ba xian", "card_type_in": ["santo", "token"]}, "min_targets": 1, "max_targets": 1},
             "effect": {"action": "move_to_hand"},
         },
         {
-            "condition": {"all_of": [{"selected_option_in": ["summon"]}, {"source_counter_gte": 5}]},
+            "condition": {"all_of": [{"selected_option_in": ["summon"]}, {"source_counter_gte": {"key": "campana_counter", "amount": 5}}]},
             "target": {"type": "source_card"},
-            "effect": {"action": "campana_remove_counter", "amount": 5},
+            "effect": {"action": "remove_source_counter", "flag": "campana_counter", "amount": 5},
         },
         {
-            "condition": {"all_of": [{"selected_option_in": ["summon"]}, {"source_counter_gte": 5}]},
+            "condition": {"all_of": [{"selected_option_in": ["summon"]}, {"source_counter_gte": {"key": "campana_counter", "amount": 5}}]},
             "target": {"type": "selected_target", "zone": "graveyard", "owner": "me", "card_filter": {"name_contains": "ba xian", "card_type_in": ["santo", "token"]}, "min_targets": 1, "max_targets": 1},
             "effect": {"action": "summon_target_to_field"},
         },

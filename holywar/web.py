@@ -643,7 +643,7 @@ class WebGameSession:
             can_activate = can_activate and activation_owner == self.engine.state.active_player
         play_targeting = str(getattr(script, "play_targeting", "auto") or "auto").strip().lower()
         manual_steps = self._manual_play_steps(uid, hand_owner) if hand_owner is not None else []
-        legacy_target_modes = {"own_saint", "opponent_saint", "own_graveyard_saint", "manual", "multi", "monsone"}
+        legacy_target_modes = {"own_saint", "opponent_saint", "own_graveyard_saint", "manual", "multi", "custom"}
         play_requires_target = bool(manual_steps) or play_targeting in legacy_target_modes
         play_ready = False
         if script is not None and hand_owner is not None:
@@ -1071,9 +1071,9 @@ class WebGameSession:
             script = runtime_cards.get_script(inst.definition.name)
             steps = self._manual_play_steps(uid, actor_idx)
             formatter = "standard"
-            if script is not None and str(script.play_targeting or "").strip().lower() == "monsone":
-                steps = self._monsone_steps(uid, actor_idx)
-                formatter = "monsone"
+            if script is not None and "web_options" in script.targeting_handlers:
+                steps = script.targeting_handlers["web_options"](self, uid, actor_idx)
+                formatter = "named_steps"
             sacrifice = self._sacrifice_step(uid, actor_idx, script)
             if sacrifice is not None:
                 steps.append(sacrifice)
@@ -1081,38 +1081,9 @@ class WebGameSession:
             return {
                 "ok": True, "uid": uid, "steps": steps, "formatter": formatter,
                 "placement": placement,
+                "target_prefix": script.target_payload_prefix if script else "",
             }
 
-    def _monsone_steps(self, spell_uid: str, player_idx: int) -> list[dict[str, Any]]:
-        assert self.engine is not None
-        player = self.engine.state.players[player_idx]
-        hand = [uid for uid in player.hand if uid != spell_uid]
-        field: list[str] = []
-        for owner_idx in (0, 1):
-            target_player = self.engine.state.players[owner_idx]
-            uids = [uid for uid in target_player.attack + target_player.defense + target_player.artifacts if uid]
-            if target_player.building:
-                uids.append(target_player.building)
-            for uid in uids:
-                inst = self.engine.state.instances.get(uid)
-                try:
-                    crosses = int(float(inst.definition.crosses)) if inst is not None else 99
-                except (TypeError, ValueError):
-                    crosses = 99
-                if crosses <= 8:
-                    field.append(uid)
-        return [
-            {
-                "action_index": 0, "key": "discard", "zone": "Mano - scarto",
-                "minimum": 0, "maximum": min(3, len(hand)),
-                "candidates": [self._candidate_option(uid, player_idx) for uid in hand],
-            },
-            {
-                "action_index": 1, "key": "return", "zone": "Terreno - ritorno al reliquiario (Croci <= 8)",
-                "minimum": 0, "maximum": min(3, len(field)),
-                "candidates": [self._candidate_option(uid, player_idx) for uid in field],
-            },
-        ]
 
     def _sacrifice_step(self, uid: str, player_idx: int, script: Any) -> dict[str, Any] | None:
         if self.engine is None or script is None:
@@ -1192,7 +1163,7 @@ class WebGameSession:
     def _player(self, player_idx: int, *, reveal_hand: bool, hide_field: bool = False) -> dict[str, Any]:
         assert self.engine is not None
         player = self.engine.state.players[player_idx]
-        promise = dict(self.engine.state.flags.get("oltretomba_promise_active", {}) or {})
+        promise = dict(self.engine.state.flags.get("deck_graveyard_merge_active", {}) or {})
         attack_cards = [None] * len(player.attack) if hide_field else [self._card(uid) for uid in player.attack]
         defense_cards = [None] * len(player.defense) if hide_field else [self._card(uid) for uid in player.defense]
         if player_idx == self.engine.state.active_player:
@@ -1286,7 +1257,7 @@ class WebGameSession:
         indexes: list[int] = []
         for index, uid in enumerate(self.engine.state.players[player_idx].hand):
             definition = self.engine.state.instances[uid].definition
-            if definition.card_type.strip().lower() in {"benedizione", "maledizione"} or definition.name.strip().lower() == "moribondo":
+            if runtime_cards.allows_quick_play(definition.name, definition.card_type):
                 indexes.append(index)
         return indexes
 
@@ -1294,7 +1265,7 @@ class WebGameSession:
         assert self.engine is not None
         player = self.engine.state.players[player_idx]
         inst = self.engine.state.instances[player.hand[hand_index]]
-        own_target = inst.definition.card_type.strip().lower() == "benedizione" or inst.definition.name.strip().lower() == "moribondo"
+        own_target = runtime_cards.quick_target_owner(inst.effect_name, inst.definition.card_type) == "me"
         target_player = player if own_target else self.engine.state.players[1 - player_idx]
         for index in range(3):
             if target_player.attack[index]:
@@ -1518,7 +1489,7 @@ class WebGameSession:
                     assert self.engine is not None
                     if self.chain_active:
                         definition = self.engine.state.instances[uid].definition
-                        is_quick = definition.card_type.strip().lower() in {"benedizione", "maledizione"} or definition.name.strip().lower() == "moribondo"
+                        is_quick = runtime_cards.allows_quick_play(definition.name, definition.card_type)
                         if not is_quick:
                             return type("Result", (), {"ok": False, "message": "Durante la catena puoi giocare solo carte rapide."})()
                         result = self.engine.quick_play(actor_idx, hand_index, str(target) if target else None)

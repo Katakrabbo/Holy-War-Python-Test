@@ -72,7 +72,7 @@ class GUIGameActionsMixin:
             "own_graveyard_saint",
             "manual",
             "multi",
-            "monsone",
+            "custom",
         }:
             return True
 
@@ -189,14 +189,14 @@ class GUIGameActionsMixin:
             return (1, None)
         if mode in {"own_saint", "opponent_saint", "own_graveyard_saint", "manual"}:
             return (1, 1)
-        if mode == "monsone":
-            return (0, 3)
+        if mode == "custom":
+            return (0, None)
 
         # Carte senza target, tipo Concentrazione
         return (0, 0)
 
-    def _is_monsone_card(self, uid: str) -> bool:
-        return self._play_targeting_mode(uid) == "monsone"
+    def _has_custom_targeting(self, uid: str) -> bool:
+        return self._play_targeting_mode(uid) == "custom"
 
     # Generates a list of candidate target UIDs for a card with the given UID based on its targeting mode and specifications, which is used to provide guided target selection options to the player when playing the card.
     def _guided_target_candidates(self, uid: str) -> list[str]:
@@ -635,99 +635,6 @@ class GUIGameActionsMixin:
         return token
 
     # Handles the target selection process for the "Monsone" card effect, allowing the player to select up to 3 cards from their hand to discard and up to 3 cards on the field with 8 or fewer crosses to return to their respective reliquaries, and returns a formatted target string representing the player's choices for the card's effect resolution.
-    def _monsone_target_payload(self, spell_uid: str) -> tuple[bool, str | None]:
-        if self.engine is None:
-            return (True, None)
-        own_idx = self.current_human_idx() or 0
-        player = self.engine.state.players[own_idx]
-
-        hand_choices: list[tuple[str, str]] = []
-        for h_uid in player.hand:
-            if h_uid == spell_uid:
-                continue
-            c = self.engine.state.instances[h_uid].definition
-            hand_choices.append((f"{c.name} ({c.card_type})", h_uid))
-
-        canceled, picked_hand = self._open_board_target_picker(
-            title="Monsone - Scarto",
-            prompt="Seleziona fino a 3 carte dalla tua mano da mandare al cimitero.",
-            choices=hand_choices,
-            allow_multi=True,
-            min_targets=0,
-            max_targets=3,
-            allow_none=True,
-            allow_manual=False,
-            card_uid=spell_uid,
-        )
-        if canceled:
-            return (True, None)
-        discard_uids: list[str] = []
-        if picked_hand:
-            discard_uids = [x for x in picked_hand.split(",") if x]
-
-        field_choices: list[tuple[str, str]] = []
-        for p_idx in (0, 1):
-            side = "Tuo campo" if p_idx == own_idx else "Campo avversario"
-            p = self.engine.state.players[p_idx]
-            for i, s_uid in enumerate(p.attack):
-                if not s_uid:
-                    continue
-                inst = self.engine.state.instances[s_uid]
-                try:
-                    crosses = int(float(inst.definition.crosses))
-                except (ValueError, TypeError):
-                    crosses = 99
-                if crosses <= 8:
-                    field_choices.append((f"{side} Attacco {i+1} | {inst.definition.name} (Croci {inst.definition.crosses})", s_uid))
-            for i, s_uid in enumerate(p.defense):
-                if not s_uid:
-                    continue
-                inst = self.engine.state.instances[s_uid]
-                try:
-                    crosses = int(float(inst.definition.crosses))
-                except (ValueError, TypeError):
-                    crosses = 99
-                if crosses <= 8:
-                    field_choices.append((f"{side} Difesa {i+1} | {inst.definition.name} (Croci {inst.definition.crosses})", s_uid))
-            for i, a_uid in enumerate(p.artifacts):
-                if not a_uid:
-                    continue
-                inst = self.engine.state.instances[a_uid]
-                try:
-                    crosses = int(float(inst.definition.crosses))
-                except (ValueError, TypeError):
-                    crosses = 99
-                if crosses <= 8:
-                    field_choices.append((f"{side} Artefatto {i+1} | {inst.definition.name} (Croci {inst.definition.crosses})", a_uid))
-            if p.building:
-                b_uid = p.building
-                inst = self.engine.state.instances[b_uid]
-                try:
-                    crosses = int(float(inst.definition.crosses))
-                except (ValueError, TypeError):
-                    crosses = 99
-                if crosses <= 8:
-                    field_choices.append((f"{side} Edificio | {inst.definition.name} (Croci {inst.definition.crosses})", b_uid))
-
-        canceled, picked_field = self._open_board_target_picker(
-            title="Monsone - Ritorno al Reliquiario",
-            prompt="Seleziona fino a 3 carte sul terreno (Croci <= 8) da rimettere nei reliquiari dei rispettivi proprietari.",
-            choices=field_choices,
-            allow_multi=True,
-            min_targets=0,
-            max_targets=3,
-            allow_none=True,
-            allow_manual=False,
-            card_uid=spell_uid,
-        )
-        if canceled:
-            return (True, None)
-        return_uids: list[str] = []
-        if picked_field:
-            return_uids = [x for x in picked_field.split(",") if x]
-
-        target = f"monsone:discard={','.join(discard_uids)};return={','.join(return_uids)}"
-        return (False, target)
 
     # Handles the process of collecting target selections for cards with multiple on-play actions that require targets, prompting the player to select valid targets for each action in sequence, and returns a formatted payload string representing the player's choices for all the actions, which is used for resolving the card's effects in the game engine.
     def _collect_on_play_action_targets(self, uid: str) -> tuple[bool, str | None]:
@@ -803,8 +710,9 @@ class GUIGameActionsMixin:
 
     # Handles the guided target selection process when a player attempts to play a card that requires targets, providing a user interface for selecting valid targets based on the card's specifications and the current game state, and then initiates the card play action with the selected targets.
     def ask_guided_quick_target(self, uid: str) -> None:
-        if self._is_monsone_card(uid):
-            canceled, target = self._monsone_target_payload(uid)
+        if self._has_custom_targeting(uid):
+            script = runtime_cards.get_script(self.engine.state.instances[uid].effect_name)
+            canceled, target = script.targeting_handlers["gui_target"](self, uid)
             if canceled:
                 return
             self.play_uid(uid, target)
@@ -925,8 +833,8 @@ class GUIGameActionsMixin:
         idx = hand.index(uid)
         if self.chain_active:
             ctype = self.engine.state.instances[uid].definition.card_type.lower()
-            is_moribondo = self.engine.state.instances[uid].definition.name.lower().strip() == "moribondo"
-            if ctype not in {"benedizione", "maledizione"} and not is_moribondo:
+            allows_quick_play = runtime_cards.allows_quick_play(self.engine.state.instances[uid].effect_name, self.engine.state.instances[uid].definition.card_type)
+            if ctype not in {"benedizione", "maledizione"} and not allows_quick_play:
                 messagebox.showwarning("Catena", "Durante la catena puoi giocare solo Benedizioni/Maledizioni.")
                 return
             res = self.engine.quick_play(own_idx, idx, target)

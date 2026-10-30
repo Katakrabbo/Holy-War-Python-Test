@@ -18,7 +18,7 @@ class RuntimeEffectsConditionsMixin:
         def _get_zone_cards(self, engine: GameEngine, owner_idx: int, zone_name: str) -> list[str]: ...
         def _filter_target_pool(self, engine: GameEngine, owner_idx: int, target: TargetSpec, pool: list[str]) -> list[str]: ...
         def get_is_pyramid(self, card_name: str) -> bool: ...
-        def get_is_altare_sigilli(self, card_name: str) -> bool: ...
+        def get_provides_player_counter(self, card_name: str) -> bool: ...
 
     def _event_matches(self, ctx: "RuleEventContext", owner_idx: int, condition: dict[str, Any]) -> bool:
         if not condition:
@@ -190,14 +190,14 @@ class RuntimeEffectsConditionsMixin:
             source_inst = ctx.engine.state.instances[source_uid]
             counter = 0
             for tag in list(source_inst.blessed):
-                if not isinstance(tag, str) or not tag.startswith("campana_counter:"):
+                if not isinstance(tag, str) or not tag.startswith(f"{source_counter_gte['key']}:"):
                     continue
                 try:
                     counter = int(tag.split(":", 1)[1])
                 except ValueError:
                     counter = 0
                 break
-            if counter < int(source_counter_gte):
+            if counter < int(source_counter_gte["amount"]):
                 return False
         selected_target_exists = condition.get("selected_target_exists")
         if selected_target_exists is not None:
@@ -349,9 +349,9 @@ class RuntimeEffectsConditionsMixin:
             counts = ctx.engine.state.flags.get("saints_sent_to_graveyard_this_turn", {"0": 0, "1": 0})
             if int(counts.get(str(owner_idx), 0)) < int(saints_to_graveyard_gte):
                 return False
-        altare_sigilli_gte = condition.get("controller_altare_sigilli_gte")
-        if altare_sigilli_gte is not None:
-            if ctx.engine._get_altare_sigilli(owner_idx) < int(altare_sigilli_gte):
+        counter_condition = condition.get("controller_counter_gte")
+        if counter_condition is not None:
+            if self.get_player_counter(ctx.engine, owner_idx, counter_condition["key"]) < int(counter_condition["amount"]):
                 return False
         distinct_saints_gte = condition.get("controller_has_distinct_saints_gte")
         if distinct_saints_gte is not None:
@@ -512,7 +512,7 @@ class RuntimeEffectsConditionsMixin:
 
         card_filter = dict(requirement.get("card_filter", {}) or {})
         script_is_pyramid = card_filter.pop("script_is_pyramid", None)
-        script_is_altare_sigilli = card_filter.pop("script_is_altare_sigilli", None)
+        script_provides_player_counter = card_filter.pop("script_provides_player_counter", None)
         raw_crosses_gte = card_filter.get("crosses_gte")
         raw_crosses_lte = card_filter.get("crosses_lte")
         raw_strength_gte = card_filter.get("strength_gte")
@@ -565,14 +565,14 @@ class RuntimeEffectsConditionsMixin:
             filtered = [
                 uid
                 for uid in filtered
-                if self.get_is_pyramid(engine.state.instances[uid].definition.name) is wanted
+                if self.get_is_pyramid(engine.state.instances[uid].effect_name) is wanted
             ]
-        if script_is_altare_sigilli is not None:
-            wanted = bool(script_is_altare_sigilli)
+        if script_provides_player_counter is not None:
+            wanted = bool(script_provides_player_counter)
             filtered = [
                 uid
                 for uid in filtered
-                if self.get_is_altare_sigilli(engine.state.instances[uid].definition.name) is wanted
+                if self.get_provides_player_counter(engine.state.instances[uid].effect_name) is wanted
             ]
         return filtered
 

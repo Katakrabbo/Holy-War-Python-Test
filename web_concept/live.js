@@ -723,7 +723,7 @@ async function beginPlay(card, placement = "") {
     const options = await api("/api/play-options", { uid: card.uid, placement });
     if (options.steps.length) {
       openEffectSelection(card, options.steps, {
-        kind: "play", uid: card.uid, placement: options.placement, formatter: options.formatter
+        kind: "play", uid: card.uid, placement: options.placement, formatter: options.formatter, targetPrefix: options.target_prefix
       });
     } else if (card.play_requires_target) {
       // Compatibility path for the few legacy scripts that still use a
@@ -767,8 +767,8 @@ $("#effect-selection-form").addEventListener("submit", event => {
     values.push({ actionIndex: step.action_index, value: chosen.join(",") });
   }
   let target;
-  if (selection.action.formatter === "monsone") {
-    target = `monsone:discard=${values[0]?.value || ""};return=${values[1]?.value || ""}`;
+  if (selection.action.formatter === "named_steps") {
+    target = `${selection.action.targetPrefix}:${values.map((item, index) => `${selection.steps[index].key}=${item.value}`).join(";")}`;
   } else if (selection.action.formatter === "sacrifice") {
     const sacrifices = values.find((item, index) => selection.steps[index]?.key === "sacrifice")?.value || "";
     target = `${selection.action.placement || ""}|sac:${sacrifices}`;

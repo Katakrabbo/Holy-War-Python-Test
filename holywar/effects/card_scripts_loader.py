@@ -52,4 +52,8 @@ def iter_card_scripts() -> Iterator[tuple[str, dict[str, Any]]]:
         if key in seen:
             continue
         seen.add(key)
-        yield card_name, dict(spec)
+        loaded = dict(spec)
+        loaded["action_handlers"] = dict(getattr(module, "ACTION_HANDLERS", {}) or {})
+        loaded["rule_hooks"] = dict(getattr(module, "RULE_HOOKS", {}) or {})
+        loaded["targeting_handlers"] = dict(getattr(module, "TARGETING_HANDLERS", {}) or {})
+        yield card_name, loaded

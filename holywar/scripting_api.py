@@ -386,7 +386,7 @@ class RuleAPI:
         p = self.state.players[player_idx]
         z = _norm(zone)
         # If Promessa dell'oltretomba is active for this player, deck and graveyard are the same logical zone
-        promise_state = dict(getattr(self.engine.state, "flags", {}).get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+        promise_state = dict(getattr(self.engine.state, "flags", {}).get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
         merged = bool(promise_state.get(str(player_idx), False))
         if z in {"relicario", "deck"}:
             if merged:
@@ -419,7 +419,7 @@ class RuleAPI:
             if uid in p.hand:
                 return idx, "hand"
             # If Promessa dell'oltretomba is active for this player, consider deck cards as graveyard for queries
-            promise_state = dict(getattr(self.engine.state, "flags", {}).get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+            promise_state = dict(getattr(self.engine.state, "flags", {}).get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
             merged = bool(promise_state.get(str(idx), False))
             if uid in p.deck:
                 if merged:
@@ -468,7 +468,7 @@ class RuleAPI:
     def in_graveyard(self, card_name: str) -> bool:
         key = _norm_ascii(card_name)
         p = self.state.players[self.controller_idx]
-        promise_state = dict(getattr(self.engine.state, "flags", {}).get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+        promise_state = dict(getattr(self.engine.state, "flags", {}).get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
         merged = bool(promise_state.get(str(self.controller_idx), False))
         uids = list(p.graveyard) + ([uid for uid in p.deck if uid not in p.graveyard] if merged else [])
         for uid in uids:
@@ -723,7 +723,7 @@ class RuleAPI:
     def count_cards_in_graveyard(self, player: int) -> int:
         idx = int(player)
         p = self.state.players[idx]
-        promise_state = dict(getattr(self.engine.state, "flags", {}).get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+        promise_state = dict(getattr(self.engine.state, "flags", {}).get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
         if bool(promise_state.get(str(idx), False)):
             # merged zone: count unique cards in graveyard + deck
             return len(list(dict.fromkeys(p.graveyard + p.deck)))

@@ -70,15 +70,15 @@ SCRIPT = {
                     {
                         "value": "add",
                         "label": "Aggiungi 1 Segnalino Sigillo",
-                        "condition": {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
+                        "condition": {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
                     },
                     {
                         "value": "draw",
                         "label": "Rimuovi 3 Segnalini e pesca 1 carta",
                         "condition": {
                             "all_of": [
-                                {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
-                                {"controller_altare_sigilli_gte": 3},
+                                {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
+                                {"controller_counter_gte": {"key": "sigilli", "amount": 3}},
                             ]
                         },
                     },
@@ -89,41 +89,41 @@ SCRIPT = {
             "condition": {
                 "all_of": [
                     {"selected_option_in": ["add"]},
-                    {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
+                    {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
                 ]
             },
             "target": {
                 "type": "cards_controlled_by_owner",
                 "zone": "field",
                 "owner": "me",
-                "card_filter": {"script_is_altare_sigilli": True},
+                "card_filter": {"script_provides_player_counter": True},
                 "max_targets": 1,
             },
-            "effect": {"action": "add_seal_counter", "amount": 1},
+            "effect": {"action": "add_player_counter", "flag": "sigilli", "amount": 1},
         },
         {
             "condition": {
                 "all_of": [
                     {"selected_option_in": ["draw"]},
-                    {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
-                    {"controller_altare_sigilli_gte": 3},
+                    {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
+                    {"controller_counter_gte": {"key": "sigilli", "amount": 3}},
                 ]
             },
             "target": {
                 "type": "cards_controlled_by_owner",
                 "zone": "field",
                 "owner": "me",
-                "card_filter": {"script_is_altare_sigilli": True},
+                "card_filter": {"script_provides_player_counter": True},
                 "max_targets": 1,
             },
-            "effect": {"action": "remove_seal_counter", "amount": 3},
+            "effect": {"action": "remove_player_counter", "flag": "sigilli", "amount": 3},
         },
         {
             "condition": {
                 "all_of": [
                     {"selected_option_in": ["draw"]},
-                    {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
-                    {"controller_altare_sigilli_gte": 3},
+                    {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
+                    {"controller_counter_gte": {"key": "sigilli", "amount": 3}},
                 ]
             },
             "target": {"type": "source_card"},

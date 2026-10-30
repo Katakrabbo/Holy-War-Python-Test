@@ -130,26 +130,12 @@ SCRIPT = {
         },
         {
             "condition": {"selected_option_in": ["buff"]},
-            "target": {
-                "type": "selected_target",
-                "zone": "field",
-                "owner": "me",
-                "card_filter": SAINT_FILTER,
-                "min_targets": 1,
-                "max_targets": 1,
-            },
+            "target": {"type": "selected_target"},
             "effect": {"action": "increase_faith", "amount": 2},
         },
         {
             "condition": {"selected_option_in": ["buff"]},
-            "target": {
-                "type": "selected_target",
-                "zone": "field",
-                "owner": "me",
-                "card_filter": SAINT_FILTER,
-                "min_targets": 1,
-                "max_targets": 1,
-            },
+            "target": {"type": "selected_target"},
             "effect": {"action": "increase_strength", "amount": 2},
         },
         {
@@ -168,14 +154,7 @@ SCRIPT = {
         },
         {
             "condition": {"selected_option_in": ["artifact"]},
-            "target": {
-                "type": "selected_target",
-                "zone": "graveyard",
-                "owner": "me",
-                "card_filter": ARTIFACT_FILTER,
-                "min_targets": 1,
-                "max_targets": 1,
-            },
+            "target": {"type": "selected_target"},
             "effect": {"action": "move_to_hand"},
         },
         {

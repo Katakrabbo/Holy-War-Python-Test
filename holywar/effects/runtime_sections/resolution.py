@@ -220,7 +220,7 @@ class RuntimeResolutionMixin:
     ) -> tuple[bool, str | None]:
         self.ensure_all_cards_migrated(engine)
         inst = engine.state.instances[uid]
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
         if not script.can_play_from_hand:
             return (False, "Questa carta non puo essere giocata dalla mano.")
 
@@ -258,7 +258,7 @@ class RuntimeResolutionMixin:
     ) -> tuple[bool, str | None]:
         self.ensure_all_cards_migrated(engine)
         inst = engine.state.instances[uid]
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
 
         mode = _norm(script.on_activate_mode)
 
@@ -298,7 +298,7 @@ class RuntimeResolutionMixin:
     def resolve_play(self, engine: GameEngine, player_idx: int, uid: str, target: str | None) -> object:
         self.ensure_all_cards_migrated(engine)
         inst = engine.state.instances[uid]
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
         mode = _norm(script.on_play_mode)
         flags = engine.state.flags
         previous_source = flags.get("_runtime_effect_source")
@@ -400,7 +400,7 @@ class RuntimeResolutionMixin:
         self.ensure_all_cards_migrated(engine)
         self.on_enter_bind_triggers(engine, player_idx, uid)
         inst = engine.state.instances[uid]
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
         mode = _norm(script.on_enter_mode)
         flags = engine.state.flags
         enter_stack = flags.setdefault("_runtime_enter_stack", [])
@@ -457,7 +457,7 @@ class RuntimeResolutionMixin:
     def resolve_activate(self, engine: GameEngine, player_idx: int, uid: str, target: str | None) -> object:
         self.ensure_all_cards_migrated(engine)
         inst = engine.state.instances[uid]
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
         mode = _norm(script.on_activate_mode)
         flags = engine.state.flags
         previous_source = flags.get("_runtime_effect_source")
@@ -562,10 +562,7 @@ class RuntimeResolutionMixin:
 
         # Convert the owner index from the raw string format stored in the flags to an integer. This is necessary because runtime flags are typically stored as strings, but the owner index needs to be an integer for further processing. If the conversion fails, it would raise a ValueError, but in this context we assume that the data in the flags is well-formed.
         owner_idx = int(owner_idx_raw)
-        script = self._scripts.get(_norm(inst.definition.name), CardScript(name=inst.definition.name))
-        card_type = _norm(inst.definition.card_type)
-        normalized_name = _norm(inst.definition.name)
-        is_piaga_blessing_or_curse = card_type in {"benedizione", "maledizione"} and "piaga" in normalized_name
+        script = self._scripts.get(_norm(inst.effect_name), CardScript(name=inst.definition.name))
         start_index = int(flags.get("_runtime_action_index_resume", 0))
         mode = str(flags.get("_runtime_pending_mode", "")).strip().lower()
         previous_source = flags.get("_runtime_effect_source")
@@ -762,7 +759,7 @@ class RuntimeResolutionMixin:
     # This method is responsible for binding the appropriate triggers for a card when it enters the field. It checks the card's script for any defined triggered effects and subscribes to the relevant game events based on those effects. The method also manages the bindings to ensure that they are properly unsubscribed when the card leaves the field, preventing any lingering triggers that could cause unintended interactions. The triggers are set up to check their conditions and resolve their effects when the specified events occur during gameplay.
     def on_enter_bind_triggers(self, engine: GameEngine, owner_idx: int, source_uid: str) -> None:
         self.ensure_all_cards_migrated(engine)
-        script = self._scripts.get(_norm(engine.state.instances[source_uid].definition.name))
+        script = self._scripts.get(_norm(engine.state.instances[source_uid].effect_name))
         if not script or not script.triggered_effects:
             return
         eng_key = id(engine)
@@ -797,6 +794,8 @@ class RuntimeResolutionMixin:
 
             # The handler function defined here is responsible for checking if the trigger conditions are met when the specified event occurs. It verifies if the source of the event is still on the field (if required by the trigger), checks if the event is happening during the correct player's turn, and evaluates any additional conditions specified in the trigger. If all conditions are met, it resolves the effect associated with the trigger. The handler also logs the trigger activation and manages runtime flags to keep track of the event context during resolution.
             def _handler(ctx: RuleEventContext, _te=te, _owner=owner_idx, _source=source_uid, _event_name=event_name):
+                if "silenced" in ctx.engine.state.instances[_source].cursed:
+                    return
                 # During hidden preparation each side is an isolated setup
                 # area.  A permanent already placed by the other player must
                 # not react to, or reveal information about, the field that is
@@ -847,6 +846,12 @@ class RuntimeResolutionMixin:
                 source_inst = ctx.engine.state.instances.get(_source)
                 source_name = source_inst.definition.name if source_inst is not None else _source
                 ctx.engine.state.log(f"{source_name} attiva il suo effetto.")
+                context_keys = (
+                    "_runtime_event_card", "_runtime_event_source", "_runtime_event_target",
+                    "_runtime_event_amount", "_runtime_event_controller", "_runtime_event_name",
+                    "_runtime_source_card",
+                )
+                previous_context = {key: ctx.engine.state.flags[key] for key in context_keys if key in ctx.engine.state.flags}
                 ctx.engine.state.flags["_runtime_event_card"] = str(
                     ctx.payload.get("card", ctx.payload.get("saint", ctx.payload.get("token", "")))
                 )
@@ -905,13 +910,11 @@ class RuntimeResolutionMixin:
                                 else:
                                     self._apply_effect(ctx.engine, _owner, _source, follow_targets, follow_te.effect)
                 finally:
-                    ctx.engine.state.flags.pop("_runtime_event_card", None)
-                    ctx.engine.state.flags.pop("_runtime_event_source", None)
-                    ctx.engine.state.flags.pop("_runtime_event_target", None)
-                    ctx.engine.state.flags.pop("_runtime_event_amount", None)
-                    ctx.engine.state.flags.pop("_runtime_event_controller", None)
-                    ctx.engine.state.flags.pop("_runtime_event_name", None)
-                    ctx.engine.state.flags.pop("_runtime_source_card", None)
+                    for key in context_keys:
+                        if key in previous_context:
+                            ctx.engine.state.flags[key] = previous_context[key]
+                        else:
+                            ctx.engine.state.flags.pop(key, None)
 
             api.subscribe(event_name, _handler)
             by_source[source_uid].append((event_name, _handler))
@@ -1200,7 +1203,7 @@ class RuntimeResolutionMixin:
                         protector_uids.append(p.building)
                     blocked = False
                     for protector_uid in protector_uids:
-                        protector_name = engine.state.instances[protector_uid].definition.name
+                        protector_name = engine.state.instances[protector_uid].effect_name
                         if self.blocks_interaction(
                             protector_name,
                             event="target_by_effect",

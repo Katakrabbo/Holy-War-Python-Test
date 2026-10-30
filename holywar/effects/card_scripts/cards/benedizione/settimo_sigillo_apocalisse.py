@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 CARD_NAME = 'Settimo Sigillo: Apocalisse'
 
@@ -9,8 +9,8 @@ SCRIPT = {
     "play_targeting": "none",
     "play_requirements": {
         "all_of": [
-            {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
-            {"controller_altare_sigilli_gte": 7},
+            {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
+            {"controller_counter_gte": {"key": "sigilli", "amount": 7}},
         ]
     },
     "triggered_effects": [],

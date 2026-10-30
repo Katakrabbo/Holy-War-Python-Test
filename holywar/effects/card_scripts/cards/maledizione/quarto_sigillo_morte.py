@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 CARD_NAME = 'Quarto Sigillo: Morte'
 
@@ -10,7 +10,7 @@ SCRIPT = {
     "triggered_effects": [],
     "on_play_actions": [
         {
-            "condition": {"controller_altare_sigilli_gte": 5},
+            "condition": {"controller_counter_gte": {"key": "sigilli", "amount": 5}},
             "target": {
                 "type": "selected_target",
                 "zone": "field",
@@ -22,7 +22,7 @@ SCRIPT = {
             "effect": {"action": "destroy_card"},
         },
         {
-            "condition": {"not": {"controller_altare_sigilli_gte": 5}},
+            "condition": {"not": {"controller_counter_gte": {"key": "sigilli", "amount": 5}}},
             "target": {
                 "type": "selected_target",
                 "zone": "field",

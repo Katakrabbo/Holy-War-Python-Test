@@ -3,6 +3,8 @@ from __future__ import annotations
 CARD_NAME = "Piaga: Rane Invasive"
 
 SCRIPT = {
+    "activate_once_per_turn": True,
+    "play_requirements": {"play_once_per_turn_by_name": True, "play_usage_state_key": "piaga_effect_used_turn"},
     "on_play_mode": "scripted",
     "on_enter_mode": "auto",
     "on_activate_mode": "auto",

@@ -120,39 +120,27 @@ class GUIGameViewMixin:
             return values[lowered.index("yes")]
         return values[0]
 
-    def _seal_counter_value(self, inst) -> int:
-        if self.engine is not None and runtime_cards.get_is_altare_sigilli(inst.definition.name):
-            try:
-                return int(self.engine._get_altare_sigilli(int(inst.owner)))
-            except Exception:
-                pass
-            for tag in list(inst.blessed):
-                if not isinstance(tag, str) or not tag.startswith("sigilli:"):
-                    continue
+    def _counter_value(self, inst) -> int:
+        script = runtime_cards.get_script(inst.effect_name)
+        if script is None or not script.counter_tag:
+            return 0
+        prefix = f"{script.counter_tag}:"
+        for tag in inst.blessed:
+            if isinstance(tag, str) and tag.startswith(prefix):
                 try:
-                    return int(tag.split(":", 1)[1])
+                    return int(tag[len(prefix):])
                 except ValueError:
                     return 0
         return 0
 
-    def _generic_counter_value(self, inst) -> int:
-        for tag in list(inst.blessed):
-            if not isinstance(tag, str) or not tag.startswith("campana_counter:"):
-                continue
-            try:
-                return int(tag.split(":", 1)[1])
-            except ValueError:
-                return 0
-        return 0
-
-    def _is_altare_sigilli(self, uid: str | None) -> bool:
+    def _provides_player_counter(self, uid: str | None) -> bool:
         if not uid or self.engine is None:
             return False
         inst = self.engine.state.instances.get(uid)
         if inst is None:
             return False
         script = runtime_cards.get_script(inst.definition.name)
-        return bool(script and bool(script.is_altare_sigilli))
+        return bool(script and bool(script.provides_player_counter))
 
     # This method arranges the widgets for the attack, defense, artifacts, and building slots in a grid layout within the specified parent frame. It organizes the widgets into rows and columns, with labels indicating the type of slot (attack, defense, artifacts, building) and the corresponding widgets for each slot type. The method uses padding to ensure proper spacing between the widgets and labels for a clean and organized display of the game board elements.
     def _grid_slots(self, parent, attack, defense, artifacts, building) -> None:
@@ -220,14 +208,14 @@ class GUIGameViewMixin:
         self._set_slot_widgets(self.own_defense, own.defense)
         self._set_slot_widgets(self.own_artifacts, own.artifacts, hide_equipped=True)
         self.own_building.configure(text=self.card_label(own.building))
-        self.own_building.configure(fg="#a970ff" if self._is_altare_sigilli(own.building) else self._board_text_color())
+        self.own_building.configure(fg="#a970ff" if self._provides_player_counter(own.building) else self._board_text_color())
         self._apply_equipment_highlight(self.own_building, own.building)
 
         self._set_slot_widgets(self.enemy_attack, enemy.attack)
         self._set_slot_widgets(self.enemy_defense, enemy.defense)
         self._set_slot_widgets(self.enemy_artifacts, enemy.artifacts, hide_equipped=True)
         self.enemy_building.configure(text=self.card_label(enemy.building))
-        self.enemy_building.configure(foreground="#a970ff" if self._is_altare_sigilli(enemy.building) else self._board_text_color())
+        self.enemy_building.configure(foreground="#a970ff" if self._provides_player_counter(enemy.building) else self._board_text_color())
         self._apply_equipment_highlight(self.enemy_building, enemy.building)
         self._apply_blocked_artifact_slot_highlights()
 
@@ -551,19 +539,9 @@ class GUIGameViewMixin:
             strength = f" P:{self.engine.get_effective_strength(uid)}"
         else:
             strength = ""
-        seal_counter = self._seal_counter_value(inst)
-        generic_counter = self._generic_counter_value(inst)
-        counter_txt = ""
-        if seal_counter > 0:
-            counter_txt += f" S:{seal_counter}"
-        if generic_counter > 0:
-            counter_txt += f" C:{generic_counter}"
-        if self._is_altare_sigilli(uid) and seal_counter > 0:
-            name = f"[{seal_counter}] {inst.definition.name}"
-        elif generic_counter > 0:
-            name = f"[{generic_counter}] {inst.definition.name}"
-        else:
-            name = inst.definition.name
+        counter = self._counter_value(inst)
+        counter_txt = f" C:{counter}" if counter > 0 else ""
+        name = f"[{counter}] {inst.definition.name}" if counter > 0 else inst.definition.name
         return f"{name}{faith}{strength}{counter_txt}"
 
     # This method handles the right-click event on a card in the player's hand, providing a context menu with options for playing the card or activating its effects. It checks if the game engine is initialized and if the player can take actions, then determines which card was clicked based on the event's coordinates. Depending on the type of card and the current game state, it generates a context menu with appropriate options for playing the card or activating its effects, including any valid targets for those actions. The method also manages visual highlights for valid targets and ensures that the menu is displayed at the correct location on the screen.
@@ -581,17 +559,17 @@ class GUIGameViewMixin:
         uid = hand[idx]
         inst = self.engine.state.instances[uid]
         ctype = inst.definition.card_type.lower()
-        is_moribondo = inst.definition.name.lower().strip() == "moribondo"
+        allows_quick_play = runtime_cards.allows_quick_play(inst.effect_name, inst.definition.card_type)
 
         menu = tk.Menu(cast(tk.Misc, self), tearoff=0)
-        if self._is_monsone_card(uid):
+        if self._has_custom_targeting(uid):
             menu.add_command(label="Gioca Effetto...", command=lambda uu=uid: self.ask_guided_quick_target(uu))
             try:
                 menu.tk_popup(event.x_root, event.y_root)
             finally:
                 menu.grab_release()
             return
-        if self.chain_active and (ctype in {"benedizione", "maledizione"} or is_moribondo):
+        if self.chain_active and (ctype in {"benedizione", "maledizione"} or allows_quick_play):
             valid_targets = self._valid_play_targets(own_idx, idx, uid, quick=True)
             if valid_targets:
                 self._set_slot_highlights(valid_targets, card_uid=uid)

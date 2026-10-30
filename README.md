@@ -46,6 +46,21 @@ Prima di aggiungere o modificare carte puoi controllare dati e script senza avvi
 
 Il comando non modifica alcun file: termina con codice `1` se trova errori strutturali e distingue gli avvisi non bloccanti.
 
+Ogni carta del catalogo deve avere un unico file in `holywar/effects/card_scripts/cards/<tipo>/`.
+`SCRIPT` descrive le azioni e le condizioni usando le operazioni generiche del runtime.
+Le regole particolari devono restare nel file della carta:
+
+- `ACTION_HANDLERS`: mappa delle azioni personalizzate a funzioni con firma
+  `(runtime, engine, owner_idx, source_uid, targets, effect)`; il runtime le cerca nello script della sorgente.
+- `RULE_HOOKS`: modificatori di regole con firma `(runtime, engine, value, **context)`.
+  Ogni funzione verifica se la propria carta o protezione si applica e restituisce il valore aggiornato.
+- `TARGETING_HANDLERS`: adattatori opzionali `web_options(session, uid, player_idx)` e
+  `gui_target(gui, uid)` per selezioni particolari; `target_payload_prefix` identifica il formato del payload.
+
+Motore, AI e interfacce non devono introdurre controlli sul nome di una carta per applicarne gli effetti.
+I test in `tests/test_card_script_architecture.py` verificano la copertura del catalogo,
+la collocazione degli script e la separazione delle azioni personalizzate dal runtime condiviso.
+
 Se vuoi usare deck premade custom, aggiungi `--premades-json "my_premades.json"` al comando.
 
 I deck creati/modificati da GUI vengono salvati in:

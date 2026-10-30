@@ -26,3 +26,24 @@ SCRIPT = {
         },
     ],
 }
+
+
+def prevent_destruction(runtime, engine, prevented, *, uid, **context):
+    if prevented:
+        return True
+    inst = engine.state.instances[uid]
+    tags = [tag for tag in inst.blessed if str(tag).startswith("bende_consacrate")]
+    if not tags:
+        return False
+    used_tag = tags[0]
+    inst.blessed.remove(used_tag)
+    if ":" in used_tag:
+        source = engine.state.instances.get(used_tag.split(":", 1)[1].strip())
+        if source is not None:
+            engine.destroy_any_card(source.owner, source.uid)
+    inst.current_faith = 1
+    engine.state.log(f"{CARD_NAME} salva {inst.definition.name}: rimane con 1 Fede.")
+    return True
+
+
+RULE_HOOKS = {"prevent_saint_destruction": prevent_destruction}

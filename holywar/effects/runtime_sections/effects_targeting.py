@@ -50,7 +50,7 @@ class RuntimeEffectsTargetingMixin:
                 inst = engine.state.instances.get(uid)
                 if inst is None:
                     continue
-                script = self.get_script(inst.definition.name)
+                script = self.get_script(inst.effect_name)
                 if script and bool(script.inverts_saint_summon_controller):
                     return True
         return False
@@ -67,7 +67,7 @@ class RuntimeEffectsTargetingMixin:
         inst = engine.state.instances.get(discarded_uid)
         if inst is None:
             return
-        script = self.get_script(inst.definition.name)
+        script = self.get_script(inst.effect_name)
         if script is None:
             return
         if not bool(script.play_requirements.get("auto_activate_when_discarded_from_hand_by_effect", False)):
@@ -104,7 +104,7 @@ class RuntimeEffectsTargetingMixin:
                     elif zone == "hand":
                         pool.extend(p.hand)
                     elif zone in {"deck", "relicario"}:
-                        promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+                        promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
                         merged = bool(promise_state.get(str(scoped_owner), False))
                         if merged:
                             # when merged, include both deck and graveyard
@@ -113,7 +113,7 @@ class RuntimeEffectsTargetingMixin:
                         else:
                             pool.extend(p.deck)
                     elif zone == "graveyard":
-                        promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+                        promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
                         merged = bool(promise_state.get(str(scoped_owner), False))
                         if merged:
                             pool.extend(p.graveyard)
@@ -382,6 +382,10 @@ class RuntimeEffectsTargetingMixin:
             return []
 
         # After collecting potential targets into the pool based on the target type and specifications, filter the pool according to the criteria defined in the `TargetSpec` using the `_filter_target_pool` method. This allows for further refinement of the targets based on additional conditions or attributes specified in the `TargetSpec`. Finally, if a `max_targets` limit is specified in the `TargetSpec`, return only up to that number of targets from the filtered pool.
+        pool = list(dict.fromkeys(pool))
+        if ttype in {"selected_target", "selected_targets"} and self._target_requires_manual_selection(target):
+            selectable = set(self._collect_selectable_targets_for_manual_target(engine, owner_idx, target))
+            pool = [uid for uid in pool if uid in selectable]
         out = self._filter_target_pool(engine, owner_idx, target, pool)
         if target.max_targets is not None and target.max_targets >= 0:
             return out[: int(target.max_targets)]
@@ -415,9 +419,9 @@ class RuntimeEffectsTargetingMixin:
             return [owner_idx]
         return self._target_owner_indices(owner_idx, owner_key)
 
-    def _shuffle_graveyard_if_oltretomba_active(self, engine: GameEngine, player_idx: int) -> None:
+    def _shuffle_merged_zone_if_active(self, engine: GameEngine, player_idx: int) -> None:
         promise_state = dict(
-            engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False}
+            engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False}
         )
         if bool(promise_state.get(str(player_idx), False)):
             engine.rng.shuffle(engine.state.players[player_idx].graveyard)
@@ -426,13 +430,12 @@ class RuntimeEffectsTargetingMixin:
     def _get_zone_cards(self, engine: GameEngine, owner_idx: int, zone_name: str) -> list[str]:
         player = engine.state.players[owner_idx]
         zone = _norm(zone_name)
-        promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+        promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
         promise_active = bool(promise_state.get(str(owner_idx), False))
 
         # The following block checks the specified zone and returns the corresponding list of card UIDs for that zone. It handles various zones such as deck, hand, graveyard, excommunicated, and field. For the field zone, it combines the attack, defense, artifacts, and building zones to return all cards currently on the field for that player. This allows for easy access to the cards in different zones when resolving effects that target specific zones or when applying effects that move cards between zones.
         if zone in {"deck", "relicario", "graveyard"}:
             if promise_active:
-                # When Promessa dell'oltretomba is active, deck and graveyard are the same logical zone.
                 # Return cards from both graveyard and deck so queries counting either zone include both pools.
                 # Preserve graveyard order first and avoid duplicates.
                 merged = list(player.graveyard) + [uid for uid in player.deck if uid not in player.graveyard]
@@ -543,7 +546,7 @@ class RuntimeEffectsTargetingMixin:
 
         def _shuffle_graveyard_if_promise_active() -> None:
             promise_state = dict(
-                engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False})
+                engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False})
                 or {"0": False, "1": False}
             )
             if bool(promise_state.get(str(real_owner), False)):
@@ -551,7 +554,7 @@ class RuntimeEffectsTargetingMixin:
 
         # The following block handles moving the card to the deck. If the card is not already in the deck, it adds it to the bottom of the deck. If the card is already in the deck, it moves it to the bottom. This ensures that the card is properly placed in the deck according to game rules.
         if zone in {"deck_bottom", "bottom_of_deck"}:
-            promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+            promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
             promise_active = bool(promise_state.get(str(real_owner), False))
             if promise_active:
                 if uid not in player.graveyard:
@@ -570,7 +573,7 @@ class RuntimeEffectsTargetingMixin:
 
         # For the relicario zone, it treats it the same as the deck, adding the card to the bottom if it's not already there. This allows for effects that move cards to the relicario to function similarly to moving cards to the deck, while still keeping them in a separate zone for game mechanics purposes.
         if zone in {"deck", "relicario"}:
-            promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+            promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
             promise_active = bool(promise_state.get(str(real_owner), False))
             if promise_active:
                 if uid not in player.graveyard:

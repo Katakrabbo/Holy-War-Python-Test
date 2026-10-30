@@ -15,7 +15,7 @@ class RuntimeEffectsDeckingMixin:
         def _resolve_player_scope(self, owner_idx: int, scope: str | None) -> int: ...
         def _get_zone_cards(self, engine: GameEngine, owner_idx: int, zone_name: str) -> list[str]: ...
         def _move_uid_to_zone(self, engine: GameEngine, uid: str, to_zone: str, owner_idx: int) -> bool: ...
-        def _shuffle_graveyard_if_oltretomba_active(self, engine: GameEngine, player_idx: int) -> None: ...
+        def _shuffle_merged_zone_if_active(self, engine: GameEngine, player_idx: int) -> None: ...
         def _selected_target_raw_for_current_action(self, engine: GameEngine) -> str: ...
         def _is_uid_on_field(self, engine: GameEngine, uid: str) -> bool: ...
 
@@ -28,47 +28,6 @@ class RuntimeEffectsDeckingMixin:
         effect: EffectSpec,
         action: str,
     ) -> bool:
-        if action == "resolve_monsone_payload":
-            raw = self._selected_target_raw_for_current_action(engine)
-            if raw.startswith("monsone:"):
-                raw = raw.split(":", 1)[1]
-            selections: dict[str, list[str]] = {"discard": [], "return": []}
-            for part in raw.split(";"):
-                if "=" not in part:
-                    continue
-                key, values = part.split("=", 1)
-                key = key.strip().lower()
-                if key in selections:
-                    selections[key] = [uid.strip() for uid in values.split(",") if uid.strip()]
-
-            player = engine.state.players[owner_idx]
-            discarded = 0
-            for uid in selections["discard"][:3]:
-                if uid not in player.hand or uid == source_uid:
-                    continue
-                engine.send_to_graveyard(owner_idx, uid, from_zone_override="hand")
-                discarded += 1
-            while discarded < 3 and player.deck:
-                uid = player.deck[-1]
-                engine.send_to_graveyard(owner_idx, uid, from_zone_override="deck")
-                discarded += 1
-
-            for uid in selections["return"][:3]:
-                inst = engine.state.instances.get(uid)
-                if inst is None or not self._is_uid_on_field(engine, uid):
-                    continue
-                try:
-                    crosses = int(float(inst.definition.crosses))
-                except (TypeError, ValueError):
-                    continue
-                if crosses > 8:
-                    continue
-                card_owner = int(inst.owner)
-                if self._move_uid_to_zone(engine, uid, "relicario", card_owner):
-                    engine.state.log(f"{inst.definition.name} torna nel reliquiario.")
-            for player_idx in (0, 1):
-                engine.rng.shuffle(engine.state.players[player_idx].deck)
-            return True
         if action == "mill_cards":
             target = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
             player = engine.state.players[target]
@@ -77,7 +36,7 @@ class RuntimeEffectsDeckingMixin:
                     break
                 uid = player.deck.pop()
                 player.graveyard.append(uid)
-                self._shuffle_graveyard_if_oltretomba_active(engine, target)
+                self._shuffle_merged_zone_if_active(engine, target)
             return True
         if action == "mill_top_and_store_card_type":
             target = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
@@ -88,7 +47,7 @@ class RuntimeEffectsDeckingMixin:
                 return True
             uid = player.deck.pop()
             player.graveyard.append(uid)
-            self._shuffle_graveyard_if_oltretomba_active(engine, target)
+            self._shuffle_merged_zone_if_active(engine, target)
             inst = engine.state.instances.get(uid)
             engine.state.flags[f"_runtime_store_{store_name}"] = _norm(inst.definition.card_type) if inst is not None else ""
             return True
@@ -350,42 +309,5 @@ class RuntimeEffectsDeckingMixin:
                 engine.draw_cards(first_idx, tie_amount)
                 if second_idx != first_idx:
                     engine.draw_cards(second_idx, tie_amount)
-            return True
-        if action == "choose_artifact_from_relicario_then_shuffle":
-            flags = engine.state.flags
-            target = self._resolve_player_scope(owner_idx, effect.target_player or "me")
-            player = engine.state.players[target]
-            choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-            choice_ready = bool(flags.get("_runtime_choice_ready"))
-            expected_choice_source = f"{source_uid}:choose_artifact_from_relicario_then_shuffle:{target}"
-            if choice_ready and choice_source == expected_choice_source:
-                selected_uid = str(flags.get("_runtime_choice_selected", "")).strip()
-                candidates_raw = str(flags.get("_runtime_choice_candidates", "")).strip()
-                candidates = [v for v in candidates_raw.split(";;") if v]
-                if selected_uid in candidates and selected_uid in player.deck:
-                    self._move_uid_to_zone(engine, selected_uid, "hand", target)
-                engine.rng.shuffle(player.deck)
-                for key in ("_runtime_choice_source","_runtime_choice_ready","_runtime_choice_selected","_runtime_choice_candidates","_runtime_choice_owner","_runtime_choice_title","_runtime_choice_prompt","_runtime_choice_min_targets","_runtime_choice_max_targets"):
-                    flags.pop(key, None)
-                return True
-            candidates = [uid for uid in player.deck if uid in engine.state.instances and _norm(engine.state.instances[uid].definition.card_type) == _norm("artefatto")]
-            if not candidates:
-                engine.rng.shuffle(player.deck)
-                return True
-            flags["_runtime_choice_source"] = expected_choice_source
-            flags["_runtime_choice_candidates"] = ";;".join(candidates)
-            flags["_runtime_choice_owner"] = str(target)
-            flags["_runtime_choice_title"] = "Pietra Focaia"
-            flags["_runtime_choice_prompt"] = "Scegli un Artefatto dal reliquiario da aggiungere alla mano."
-            flags["_runtime_choice_min_targets"] = "1"
-            flags["_runtime_choice_max_targets"] = "1"
-            flags["_runtime_choice_ready"] = False
-            flags["_runtime_reveal_card"] = source_uid
-            flags["_runtime_waiting_for_reveal"] = True
-            flags["_runtime_resume_source"] = source_uid
-            flags["_runtime_resume_owner"] = str(owner_idx)
-            flags["_runtime_pending_mode"] = "trigger_action"
-            flags["_runtime_trigger_action"] = "choose_artifact_from_relicario_then_shuffle"
-            flags["_runtime_trigger_target_player"] = str(effect.target_player or "me")
             return True
         return False

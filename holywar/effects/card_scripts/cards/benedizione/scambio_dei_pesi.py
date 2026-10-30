@@ -21,14 +21,7 @@ SCRIPT = {
             "effect": {"action": "increase_faith", "amount": 2},
         },
         {
-            "target": {
-                "type": "selected_target",
-                "zone": "field",
-                "owner": "me",
-                "card_filter": {"card_type_in": ["santo", "token"]},
-                "min_targets": 1,
-                "max_targets": 1,
-            },
+            "target": {"type": "selected_target"},
             "effect": {"action": "increase_strength", "amount": 2},
         },
         {
@@ -43,14 +36,7 @@ SCRIPT = {
             "effect": {"action": "decrease_faith", "amount": 2},
         },
         {
-            "target": {
-                "type": "selected_target",
-                "zone": "field",
-                "owner": "opponent",
-                "card_filter": {"card_type_in": ["santo", "token"]},
-                "min_targets": 1,
-                "max_targets": 1,
-            },
+            "target": {"type": "selected_target"},
             "effect": {"action": "decrease_strength", "amount": 2},
         },
     ],

@@ -26,7 +26,6 @@ def _emit_end_turn_events(engine: "GameEngine", current: int) -> None:
 def _is_preparation_context(engine: "GameEngine") -> bool:
     return int(engine.state.turn_number) == 0 and int(engine.state.preparation_turns_done) < 2
 
-# The _open_saint_slot_tokens function generates a list of available slot tokens for placing saints in the attack and defense zones for a given player. It checks the player's current attack and defense slots and returns a list of tokens (e.g., "a1", "a2", "d1", "d2") for any slots that are currently empty (None). This is used to determine where a card like "Albero Sacro" can be automatically played from the hand during the draw phase.
 def _open_saint_slot_tokens(engine: "GameEngine", player_idx: int) -> list[str]:
     player = engine.state.players[player_idx]
     out: list[str] = []
@@ -38,7 +37,6 @@ def _open_saint_slot_tokens(engine: "GameEngine", player_idx: int) -> list[str]:
             out.append(f"d{i + 1}")
     return out
 
-# The _try_auto_play_from_hand function attempts to automatically play a card from the player's hand based on certain conditions and effects. It checks if the specified card UID is in the player's hand and if it exists in the game state instances. If the card is "Albero Sacro" and the game is not in the preparation context, it allows the player to choose an available slot token for automatic play. It then applies the effect of moving the card from the hand to the board and checks if the card was successfully played. This function returns True if the card was played from the hand to a valid zone, and False otherwise.
 def _try_auto_play_from_hand(engine: "GameEngine", player_idx: int, uid: str) -> bool:
     player = engine.state.players[player_idx]
     if uid not in player.hand:
@@ -51,20 +49,10 @@ def _try_auto_play_from_hand(engine: "GameEngine", player_idx: int, uid: str) ->
     previous_source = flags.get("_runtime_source_card")
     previous_selected = flags.get("_runtime_selected_target")
 
-    selected_target = ""
-    try:
-        card_name = engine.state.instances[uid].definition.name
-    except Exception:
-        card_name = ""
-    if _norm(card_name) == _norm("Albero Sacro") and not _is_preparation_context(engine):
-        chooser = getattr(engine, "choose_auto_play_slot_from_draw", None)
-        if callable(chooser):
-            slots = _open_saint_slot_tokens(engine, player_idx)
-            if slots:
-                chosen = chooser(player_idx, uid, slots)
-                chosen_norm = str(chosen or "").strip().lower()
-                if chosen_norm in {s.lower() for s in slots}:
-                    selected_target = chosen_norm
+    selected_target = runtime_cards.apply_rule(
+        engine, "auto_play_target", "", player_idx=player_idx, uid=uid,
+        preparation=_is_preparation_context(engine),
+    )
 
     # Set temporary flags for the source card and selected target, apply the effect to move the card from the hand to the board, and then restore the previous flag values. This allows any effects that depend on these flags to function correctly during the auto-play process without permanently altering the game state.
     flags["_runtime_source_card"] = uid
@@ -134,7 +122,7 @@ def _max_auto_play_drawn_faith_threshold(engine: "GameEngine", player_idx: int) 
         inst = engine.state.instances.get(uid)
         if inst is None:
             continue
-        value = runtime_cards.get_auto_play_drawn_cards_with_faith_lte(inst.definition.name)
+        value = runtime_cards.get_auto_play_drawn_cards_with_faith_lte(inst.effect_name)
         if value is None:
             continue
         val = int(value)
@@ -213,7 +201,7 @@ def initial_setup_draw(engine: "GameEngine") -> None:
 # Draws cards while applying draw-triggered effects and bookkeeping.
 def draw_cards(engine: "GameEngine", player_idx: int, amount: int) -> int:
     player = engine.state.players[player_idx]
-    promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+    promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
     promise_active = bool(promise_state.get(str(player_idx), False))
     drawn = 0
     requested = max(0, int(amount))
@@ -233,7 +221,7 @@ def draw_cards(engine: "GameEngine", player_idx: int, amount: int) -> int:
         locked_sources = list(runtime_state.get("no_attacks_until_draw_sources", []) or [])
         if locked_sources:
             runtime_state["no_attacks_until_draw_sources"] = []
-            engine.state.log("Giorno Festivo: il blocco agli attacchi termina per una pescata.")
+            engine.state.log("Il blocco agli attacchi termina per una pescata.")
 
         engine._emit_event("on_card_drawn", player_idx, card=drawn_uid, from_zone=("graveyard" if promise_active else "relicario"))
         card_name = engine.state.instances[drawn_uid].definition.name
@@ -394,7 +382,7 @@ def _summon_turn_start_tokens(engine: "GameEngine", current: int) -> None:
     for i, a_uid in enumerate(player.attack):
         if not a_uid:
             continue
-        token_name = runtime_cards.get_turn_start_summon_token_name(engine.state.instances[a_uid].definition.name)
+        token_name = runtime_cards.get_turn_start_summon_token_name(engine.state.instances[a_uid].effect_name)
         if not token_name:
             continue
         def_uid = player.defense[i]
@@ -441,7 +429,6 @@ def _run_draw_phase(engine: "GameEngine", current: int) -> int:
         next_draw_override[str(engine.state.active_player)] = 0
         return draw_cards(engine, engine.state.active_player, override_amount)
 
-    # Check for any pending "Albero Sacro" draws that need to be resolved before the normal draw. If there is a pending "Albero Sacro" draw, resolve it and return the number of cards drawn (which may be more than 1 if there are multiple pending draws).
     spore_pending = engine.state.flags.setdefault("spore_pending", {"0": False, "1": False})
     if spore_pending.get(str(engine.state.active_player), False):
         drawn = draw_cards(engine, engine.state.active_player, 8)

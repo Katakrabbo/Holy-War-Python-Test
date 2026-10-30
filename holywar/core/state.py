@@ -27,6 +27,11 @@ class CardInstance:
     blessed: list[str] = field(default_factory=list)
     cursed: list[str] = field(default_factory=list)
 
+    @property
+    def effect_name(self) -> str:
+        """Script lookup key; a silenced instance retains its printed identity."""
+        return "" if "silenced" in self.cursed else self.definition.name
+
     # The to_dict and from_dict methods allow for easy serialization and deserialization of CardInstance objects, which is essential for saving game states or transmitting them over a network. The to_dict method converts the CardInstance into a dictionary format, while the from_dict class method creates a CardInstance from a given dictionary, ensuring that all necessary fields are properly handled and any missing optional fields are given default values.
     def to_dict(self) -> dict[str, Any]:
         return {

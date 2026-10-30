@@ -1007,7 +1007,8 @@ def test_monsone_keeps_its_two_independent_multiselects() -> None:
 
     options = session.play_options({"uid": spell_uid})
 
-    assert options["formatter"] == "monsone"
+    assert options["formatter"] == "named_steps"
+    assert options["target_prefix"] == "monsone"
     assert [step["key"] for step in options["steps"]] == ["discard", "return"]
     assert options["steps"][0]["maximum"] <= 3
     assert field_uid in {item["value"] for item in options["steps"][1]["candidates"]}

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from holywar.core.engine import GameEngine
 
 
-FIELD_ZONES = {"attack", "defense", "artifact", "building"}
+FIELD_ZONES = {"attack", "defense", "artifact", "building", "equipment"}
 
 
 def _norm(text: str) -> str:
@@ -25,9 +25,9 @@ def _norm(text: str) -> str:
     return value.strip().lower()
 
 
-def _shuffle_graveyard_if_oltretomba_active(engine: "GameEngine", player_idx: int) -> None:
+def _shuffle_merged_zone_if_active(engine: "GameEngine", player_idx: int) -> None:
     promise_state = dict(
-        engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False}
+        engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False}
     )
     if bool(promise_state.get(str(player_idx), False)):
         engine.rng.shuffle(engine.state.players[player_idx].graveyard)
@@ -52,6 +52,8 @@ def locate_uid_zone(engine: "GameEngine", owner_idx: int, uid: str) -> str:
         return "artifact"
     if player.building == uid:
         return "building"
+    if _equipped_target_uid(engine, uid):
+        return "equipment"
     return "unknown"
 
 
@@ -155,12 +157,12 @@ def cleanup_equipment_links_on_leave_field(engine: "GameEngine", uid: str) -> No
             continue
         equipment_owner = int(equipment_inst.owner)
         equipment_zone = locate_uid_zone(engine, equipment_owner, equipment_uid)
-        if equipment_zone in FIELD_ZONES:
+        if equipment_zone in FIELD_ZONES or equipment_zone == "unknown":
             send_to_graveyard(
                 engine,
                 equipment_owner,
                 equipment_uid,
-                from_zone_override=equipment_zone,
+                from_zone_override="equipment" if equipment_zone == "unknown" else equipment_zone,
             )
 
 
@@ -171,6 +173,7 @@ def send_to_graveyard(
     uid: str,
     token_to_white: bool = False,
     from_zone_override: str | None = None,
+    defer_equipment_cleanup: bool = False,
 ) -> None:
     card = engine.state.instances[uid]
     board_owner_idx = find_board_owner_of_uid(engine, uid)
@@ -191,7 +194,7 @@ def send_to_graveyard(
     leaving_field = from_zone in FIELD_ZONES
     is_token = bool(getattr(card.definition, "is_token", False)) or str(card.definition.card_type).strip().lower() == "token"
 
-    if leaving_field:
+    if leaving_field and not defer_equipment_cleanup:
         cleanup_equipment_links_on_leave_field(engine, uid)
 
     if is_token:
@@ -207,7 +210,7 @@ def send_to_graveyard(
 
     if uid not in engine.state.players[grave_target_idx].graveyard:
         engine.state.players[grave_target_idx].graveyard.append(uid)
-        _shuffle_graveyard_if_oltretomba_active(engine, grave_target_idx)
+        _shuffle_merged_zone_if_active(engine, grave_target_idx)
 
     remove_from_board(engine, player, uid)
 
@@ -231,6 +234,7 @@ def excommunicate_card(
     owner_idx: int,
     uid: str,
     from_zone_override: str | None = None,
+    defer_equipment_cleanup: bool = False,
 ) -> None:
     from holywar.effects.runtime import runtime_cards
 
@@ -239,11 +243,11 @@ def excommunicate_card(
         board_owner_idx = owner_idx
     inst = engine.state.instances.get(uid)
     if inst is not None:
-        if runtime_cards.is_immune_to_action(inst.definition.name, "excommunicate_card") or runtime_cards.is_immune_to_action(
-            inst.definition.name, "excommunicate_card_no_sin"
+        if runtime_cards.is_immune_to_action(inst.effect_name, "excommunicate_card") or runtime_cards.is_immune_to_action(
+            inst.effect_name, "excommunicate_card_no_sin"
         ):
             return
-        script = runtime_cards.get_script(inst.definition.name)
+        script = runtime_cards.get_script(inst.effect_name)
         if script and bool(script.indestructible_except_own_activation):
             allowed_uid = str(engine.state.flags.get("_allow_indestructible_uid", "")).strip()
             if allowed_uid != uid:
@@ -253,7 +257,7 @@ def excommunicate_card(
 
     leaving_field = from_zone in FIELD_ZONES
 
-    if leaving_field:
+    if leaving_field and not defer_equipment_cleanup:
         cleanup_equipment_links_on_leave_field(engine, uid)
 
     if inst is None:
@@ -292,7 +296,7 @@ def absolve_card_to_graveyard(engine: "GameEngine", owner_idx: int, uid: str) ->
     if uid in player.excommunicated:
         player.excommunicated.remove(uid)
         player.graveyard.append(uid)
-        _shuffle_graveyard_if_oltretomba_active(engine, owner_idx)
+        _shuffle_merged_zone_if_active(engine, owner_idx)
 
 
 # Removes a card from the field without applying sin penalties.
@@ -320,7 +324,7 @@ def remove_from_board_no_sin(engine: "GameEngine", owner_idx: int, uid: str) -> 
 
     if uid not in player.graveyard:
         player.graveyard.append(uid)
-        _shuffle_graveyard_if_oltretomba_active(engine, owner_idx)
+        _shuffle_merged_zone_if_active(engine, owner_idx)
     remove_from_board(engine, player, uid)
 
     if leaving_field:
@@ -399,6 +403,7 @@ def move_board_card_to_hand(engine: "GameEngine", owner_idx: int, uid: str) -> b
         was_on_field = True
 
     if was_on_field:
+        cleanup_equipment_links_on_leave_field(engine, uid)
         engine._reset_card_runtime_state(uid)
 
     if uid not in player.hand:
@@ -415,7 +420,7 @@ def move_graveyard_card_to_deck_bottom(engine: "GameEngine", player_idx: int, ui
         return False
     player.graveyard.remove(uid)
     player.deck.insert(0, uid)
-    _shuffle_graveyard_if_oltretomba_active(engine, player_idx)
+    _shuffle_merged_zone_if_active(engine, player_idx)
     return True
 
 

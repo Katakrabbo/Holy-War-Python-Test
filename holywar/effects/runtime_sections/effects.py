@@ -85,7 +85,7 @@ class RuntimeEffectsMixin(
             start_index: int = 0,
         ) -> None: ...
         def is_immune_to_action(self, card_name: str, action_name: str) -> bool: ...
-        def get_is_altare_sigilli(self, card_name: str) -> bool: ...
+        def get_provides_player_counter(self, card_name: str) -> bool: ...
         def get_is_pyramid(self, card_name: str) -> bool: ...
 
     def _apply_effect(
@@ -121,6 +121,12 @@ class RuntimeEffectsMixin(
             self._apply_return_to_hand_once_per_turn(engine, owner_idx, source_uid, targets)
             return
         if not self._effect_usage_can_use(engine, owner_idx, source_uid, effect):
+            return
+        source = engine.state.instances.get(source_uid)
+        script = self.get_script(source.effect_name) if source is not None else None
+        handler = script.action_handlers.get(action) if script is not None else None
+        if handler is not None:
+            handler(self, engine, owner_idx, source_uid, targets, effect)
             return
         if self._apply_effect_resource_action(engine, owner_idx, source_uid, targets, effect, action):
             return
@@ -351,7 +357,7 @@ class RuntimeEffectsMixin(
                         return
                     flags["_runtime_choose_copy_guard"] = replay_guard_key
                     selected_inst = engine.state.instances[selected_uid]
-                    selected_script = self._scripts.get(_norm(selected_inst.definition.name), CardScript(name=selected_inst.definition.name))
+                    selected_script = self._scripts.get(_norm(selected_inst.effect_name), CardScript(name=selected_inst.definition.name))
                     copied_actions = list(selected_script.on_play_actions or [])
                     if copied_actions:
                         prepared_actions: list[ActionSpec] = []
@@ -542,9 +548,9 @@ class RuntimeEffectsMixin(
             flags.pop("_runtime_choice_labels", None)
             flags["_runtime_choice_candidates"] = ";;".join(candidates)
             flags["_runtime_choice_owner"] = str(target)
-            flags["_runtime_choice_title"] = str(effect.choice_title or "Prigioniero Sacrificale")
+            flags["_runtime_choice_title"] = str(effect.choice_title or engine.state.instances[source_uid].definition.name)
             flags["_runtime_choice_prompt"] = str(
-                effect.choice_prompt or "Scegli fino a 3 carte dalla tua mano da rimettere nel reliquiario."
+                effect.choice_prompt or "Scegli le carte dalla tua mano da rimettere nel reliquiario."
             )
             flags["_runtime_choice_min_targets"] = "0"
             flags["_runtime_choice_max_targets"] = str(max_cards)
@@ -618,7 +624,7 @@ class RuntimeEffectsMixin(
             flags["_runtime_choice_values"] = "yes;;no"
             flags["_runtime_choice_labels"] = json.dumps({"yes": "Si", "no": "No"}, ensure_ascii=False)
             flags["_runtime_choice_owner"] = str(owner_idx)
-            flags["_runtime_choice_title"] = str(effect.choice_title or "Faro di Alessandria")
+            flags["_runtime_choice_title"] = str(effect.choice_title or engine.state.instances[source_uid].definition.name)
             flags["_runtime_choice_prompt"] = str(
                 effect.choice_prompt
                 or "L'avversario ha pescato una carta. Vuoi rimischiarla nel reliquiario e fargli pescare di nuovo?"
@@ -692,325 +698,6 @@ class RuntimeEffectsMixin(
             flags["_runtime_resume_owner"] = str(owner_idx)
             flags["_runtime_pending_mode"] = "trigger_action"
             flags["_runtime_trigger_action"] = "choose_targets_and_summon_to_field"
-            return
-        if action == "sacrifice_time_resolution":
-            flags = engine.state.flags
-            owner_player = engine.state.players[owner_idx]
-            opponent_idx = 1 - owner_idx
-            opponent_player = engine.state.players[opponent_idx]
-            state_key = f"_sacrifice_time_state_{source_uid}"
-            local_state = dict(flags.get(state_key, {}) or {})
-            pending = int(local_state.get("pending", 0))
-
-            choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-            choice_ready = bool(flags.get("_runtime_choice_ready"))
-
-            if not local_state:
-                discarded_count = 0
-                for hand_uid in list(owner_player.hand):
-                    owner_player.hand.remove(hand_uid)
-                    if hand_uid not in owner_player.graveyard:
-                        owner_player.graveyard.append(hand_uid)
-                        self._shuffle_graveyard_if_oltretomba_active(engine, owner_idx)
-                    discarded_count += 1
-                    engine._emit_event(
-                        "on_card_discarded",
-                        owner_idx,
-                        card=hand_uid,
-                        from_hand_to_graveyard=True,
-                    )
-                    engine._emit_event(
-                        "on_card_sent_to_graveyard",
-                        owner_idx,
-                        card=hand_uid,
-                        from_zone="hand",
-                        owner=owner_idx,
-                    )
-                    self._maybe_auto_activate_discarded_from_hand_by_effect(engine, owner_idx, hand_uid, source_uid)
-                pending = discarded_count
-
-            if pending <= 0:
-                flags.pop(state_key, None)
-                return
-
-            if choice_ready and choice_source == source_uid:
-                mode = str(local_state.get("mode", "")).strip()
-                selected_raw = str(flags.get("_runtime_choice_selected", "")).strip()
-                candidates_raw = str(flags.get("_runtime_choice_candidates", "")).strip()
-                candidates = [v for v in candidates_raw.split(";;") if v]
-                selected_uids = [v.strip() for v in selected_raw.split(",") if v.strip()]
-                selected_uids = [uid for uid in selected_uids if uid in candidates]
-
-                if mode == "field":
-                    for t_uid in selected_uids:
-                        if t_uid in engine.state.instances:
-                            engine.send_to_graveyard(engine.state.instances[t_uid].owner, t_uid)
-                    pending = max(0, pending - len(selected_uids))
-                elif mode == "hand":
-                    for t_uid in selected_uids:
-                        if t_uid in opponent_player.hand:
-                            opponent_player.hand.remove(t_uid)
-                            if t_uid not in opponent_player.graveyard:
-                                opponent_player.graveyard.append(t_uid)
-                                self._shuffle_graveyard_if_oltretomba_active(engine, opponent_idx)
-                            pending = max(0, pending - 1)
-                            engine._emit_event(
-                                "on_card_discarded",
-                                opponent_idx,
-                                card=t_uid,
-                                from_hand_to_graveyard=True,
-                            )
-                            engine._emit_event(
-                                "on_card_sent_to_graveyard",
-                                opponent_idx,
-                                card=t_uid,
-                                from_zone="hand",
-                                owner=opponent_idx,
-                            )
-                            self._maybe_auto_activate_discarded_from_hand_by_effect(engine, opponent_idx, t_uid, source_uid)
-
-                for key in (
-                    "_runtime_choice_source",
-                    "_runtime_choice_ready",
-                    "_runtime_choice_selected",
-                    "_runtime_choice_candidates",
-                    "_runtime_choice_owner",
-                    "_runtime_choice_title",
-                    "_runtime_choice_prompt",
-                    "_runtime_choice_min_targets",
-                    "_runtime_choice_max_targets",
-                ):
-                    flags.pop(key, None)
-
-            enemy_field: list[str] = []
-            for uid in opponent_player.attack + opponent_player.defense + opponent_player.artifacts:
-                if uid:
-                    enemy_field.append(uid)
-            if opponent_player.building:
-                enemy_field.append(opponent_player.building)
-
-            if pending > 0 and enemy_field:
-                max_pick = min(pending, len(enemy_field))
-                flags[state_key] = {"pending": pending, "mode": "field"}
-                flags["_runtime_choice_source"] = source_uid
-                flags["_runtime_choice_candidates"] = ";;".join(enemy_field)
-                flags["_runtime_choice_owner"] = str(owner_idx)
-                flags["_runtime_choice_title"] = "Sacrificio del Tempo"
-                flags["_runtime_choice_prompt"] = "Seleziona le carte avversarie sul terreno da inviare al cimitero."
-                flags["_runtime_choice_min_targets"] = str(max_pick)
-                flags["_runtime_choice_max_targets"] = str(max_pick)
-                flags["_runtime_choice_ready"] = False
-                flags["_runtime_resume_same_action"] = True
-                flags["_runtime_reveal_card"] = source_uid
-                flags["_runtime_waiting_for_reveal"] = True
-                return
-
-            if pending > 0 and opponent_player.hand:
-                max_pick = min(pending, len(opponent_player.hand))
-                flags[state_key] = {"pending": pending, "mode": "hand"}
-                flags["_runtime_choice_source"] = source_uid
-                flags["_runtime_choice_candidates"] = ";;".join(opponent_player.hand)
-                flags["_runtime_choice_owner"] = str(owner_idx)
-                flags["_runtime_choice_title"] = "Sacrificio del Tempo"
-                flags["_runtime_choice_prompt"] = "Seleziona le carte della mano avversaria da scartare."
-                flags["_runtime_choice_min_targets"] = str(max_pick)
-                flags["_runtime_choice_max_targets"] = str(max_pick)
-                flags["_runtime_choice_ready"] = False
-                flags["_runtime_resume_same_action"] = True
-                flags["_runtime_reveal_card"] = source_uid
-                flags["_runtime_waiting_for_reveal"] = True
-                return
-
-            while pending > 0 and opponent_player.deck:
-                top_uid = opponent_player.deck.pop()
-                if top_uid not in opponent_player.graveyard:
-                    opponent_player.graveyard.append(top_uid)
-                    self._shuffle_graveyard_if_oltretomba_active(engine, opponent_idx)
-                pending -= 1
-                engine._emit_event(
-                    "on_card_sent_to_graveyard",
-                    opponent_idx,
-                    card=top_uid,
-                    from_zone="relicario",
-                    owner=opponent_idx,
-                )
-
-            if pending > 0 and not opponent_player.deck:
-                flags.pop(state_key, None)
-                engine.state.winner = owner_idx
-                engine.state.log(f"{owner_player.name} vince per effetto di Sacrificio del Tempo.")
-                return
-
-            if pending > 0:
-                flags[state_key] = {"pending": pending}
-                flags["_runtime_resume_same_action"] = True
-                return
-
-            flags.pop(state_key, None)
-            return
-        if action == "discard_hand_then_pressure_opponent":
-            flags = engine.state.flags
-            owner_player = engine.state.players[owner_idx]
-            target_idx = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
-            target_player = engine.state.players[target_idx]
-            per_card_amount = max(1, int(effect.amount or 1))
-            discard_trigger_source = str(flags.get("_runtime_discard_trigger_source", "")).strip()
-
-            state_key = f"_runtime_pressure_state_{source_uid}"
-            local_state = dict(flags.get(state_key, {}) or {})
-            pending = int(local_state.get("pending", 0))
-
-            choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-            choice_ready = bool(flags.get("_runtime_choice_ready"))
-
-            if not local_state:
-                discarded_count = 0
-                for hand_uid in list(owner_player.hand):
-                    # Do not count/discard the card that triggered this discard chain.
-                    if discard_trigger_source and hand_uid == discard_trigger_source:
-                        continue
-                    owner_player.hand.remove(hand_uid)
-                    if hand_uid not in owner_player.graveyard:
-                        owner_player.graveyard.append(hand_uid)
-                        self._shuffle_graveyard_if_oltretomba_active(engine, owner_idx)
-                    discarded_count += 1
-                    engine._emit_event(
-                        "on_card_discarded",
-                        owner_idx,
-                        card=hand_uid,
-                        from_hand_to_graveyard=True,
-                    )
-                    engine._emit_event(
-                        "on_card_sent_to_graveyard",
-                        owner_idx,
-                        card=hand_uid,
-                        from_zone="hand",
-                        owner=owner_idx,
-                    )
-                    self._maybe_auto_activate_discarded_from_hand_by_effect(engine, owner_idx, hand_uid, source_uid)
-                pending = discarded_count * per_card_amount
-
-            if pending <= 0:
-                flags.pop(state_key, None)
-                return
-
-            if choice_ready and (not choice_source or choice_source == source_uid):
-                mode = str(local_state.get("mode", "")).strip()
-                selected_raw = str(flags.get("_runtime_choice_selected", "")).strip()
-                candidates_raw = str(flags.get("_runtime_choice_candidates", "")).strip()
-                candidates = [v for v in candidates_raw.split(";;") if v]
-                selected_uids = [v.strip() for v in selected_raw.split(",") if v.strip()]
-                selected_uids = [uid for uid in selected_uids if uid in candidates]
-
-                if mode == "field":
-                    for t_uid in selected_uids:
-                        if t_uid in engine.state.instances:
-                            engine.send_to_graveyard(engine.state.instances[t_uid].owner, t_uid)
-                    pending = max(0, pending - len(selected_uids))
-                elif mode == "hand":
-                    for t_uid in selected_uids:
-                        if t_uid in target_player.hand:
-                            target_player.hand.remove(t_uid)
-                            if t_uid not in target_player.graveyard:
-                                target_player.graveyard.append(t_uid)
-                                self._shuffle_graveyard_if_oltretomba_active(engine, target_idx)
-                            pending = max(0, pending - 1)
-                            engine._emit_event(
-                                "on_card_discarded",
-                                target_idx,
-                                card=t_uid,
-                                from_hand_to_graveyard=True,
-                            )
-                            engine._emit_event(
-                                "on_card_sent_to_graveyard",
-                                target_idx,
-                                card=t_uid,
-                                from_zone="hand",
-                                owner=target_idx,
-                            )
-                            self._maybe_auto_activate_discarded_from_hand_by_effect(engine, target_idx, t_uid, source_uid)
-
-                for key in (
-                    "_runtime_choice_source",
-                    "_runtime_choice_ready",
-                    "_runtime_choice_selected",
-                    "_runtime_choice_candidates",
-                    "_runtime_choice_owner",
-                    "_runtime_choice_title",
-                    "_runtime_choice_prompt",
-                    "_runtime_choice_min_targets",
-                    "_runtime_choice_max_targets",
-                ):
-                    flags.pop(key, None)
-
-            target_field: list[str] = []
-            for uid in target_player.attack + target_player.defense + target_player.artifacts:
-                if uid:
-                    target_field.append(uid)
-            if target_player.building:
-                target_field.append(target_player.building)
-
-            if pending > 0 and target_field:
-                max_pick = min(pending, len(target_field))
-                flags[state_key] = {"pending": pending, "mode": "field"}
-                flags["_runtime_choice_source"] = source_uid
-                flags["_runtime_choice_candidates"] = ";;".join(target_field)
-                flags["_runtime_choice_owner"] = str(owner_idx)
-                flags["_runtime_choice_title"] = str(effect.choice_title or "Selezione Bersagli")
-                flags["_runtime_choice_prompt"] = str(
-                    effect.choice_prompt or "Seleziona le carte sul terreno da inviare al cimitero."
-                )
-                flags["_runtime_choice_min_targets"] = str(max_pick)
-                flags["_runtime_choice_max_targets"] = str(max_pick)
-                flags["_runtime_choice_ready"] = False
-                flags["_runtime_resume_same_action"] = True
-                flags["_runtime_reveal_card"] = source_uid
-                flags["_runtime_waiting_for_reveal"] = True
-                return
-
-            if pending > 0 and target_player.hand:
-                max_pick = min(pending, len(target_player.hand))
-                flags[state_key] = {"pending": pending, "mode": "hand"}
-                flags["_runtime_choice_source"] = source_uid
-                flags["_runtime_choice_candidates"] = ";;".join(target_player.hand)
-                flags["_runtime_choice_owner"] = str(owner_idx)
-                flags["_runtime_choice_title"] = str(effect.choice_title or "Selezione Bersagli")
-                flags["_runtime_choice_prompt"] = str(effect.choice_prompt or "Seleziona le carte dalla mano da scartare.")
-                flags["_runtime_choice_min_targets"] = str(max_pick)
-                flags["_runtime_choice_max_targets"] = str(max_pick)
-                flags["_runtime_choice_ready"] = False
-                flags["_runtime_resume_same_action"] = True
-                flags["_runtime_reveal_card"] = source_uid
-                flags["_runtime_waiting_for_reveal"] = True
-                return
-
-            while pending > 0 and target_player.deck:
-                top_uid = target_player.deck.pop()
-                if top_uid not in target_player.graveyard:
-                    target_player.graveyard.append(top_uid)
-                    self._shuffle_graveyard_if_oltretomba_active(engine, target_idx)
-                pending -= 1
-                engine._emit_event(
-                    "on_card_sent_to_graveyard",
-                    target_idx,
-                    card=top_uid,
-                    from_zone="relicario",
-                    owner=target_idx,
-                )
-
-            if pending > 0 and not target_player.deck:
-                flags.pop(state_key, None)
-                engine.state.winner = owner_idx
-                source_name = engine.state.instances[source_uid].definition.name if source_uid in engine.state.instances else source_uid
-                engine.state.log(f"{owner_player.name} vince per effetto di {source_name}.")
-                return
-
-            if pending > 0:
-                flags[state_key] = {"pending": pending}
-                flags["_runtime_resume_same_action"] = True
-                return
-
-            flags.pop(state_key, None)
             return
         if action == "store_target_count":
             flag_name = str(effect.flag or "").strip()
@@ -1116,20 +803,6 @@ class RuntimeEffectsMixin(
                 self._move_uid_to_zone(engine, uid, to_zone, target)
             if bool(effect.shuffle_after):
                 engine.rng.shuffle(player.deck)
-            return
-        if action == "activate_oltretomba_promise":
-            flags = engine.state.flags
-            promise_state = dict(flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
-            promise_state[str(owner_idx)] = True
-            flags["oltretomba_promise_active"] = promise_state
-
-            player = engine.state.players[owner_idx]
-            for uid in list(player.deck):
-                if uid not in player.graveyard:
-                    player.graveyard.append(uid)
-            player.deck = []
-            engine.rng.shuffle(player.graveyard)
-            engine.state.log("Promessa dell'oltretomba attiva: reliquiario e cimitero diventano la stessa zona.")
             return
         if action == "floor_divide_flag":
             flag_name = str(effect.flag or "").strip()
@@ -1432,10 +1105,10 @@ class RuntimeEffectsMixin(
                 if int(engine.state.instances[uid].owner) != int(owner_idx)
             )
             if selected_opponent < required_opponent_selected:
-                engine.state.log("Tornado: selezione non valida, serve almeno un Santo avversario tra i bersagli.")
+                engine.state.log("Selezione non valida: occorre un Santo avversario tra i bersagli.")
                 return
 
-            tornado_to_destroy: list[tuple[int, str]] = []
+            cards_to_destroy: list[tuple[int, str]] = []
             for p_idx in (0, 1):
                 p = engine.state.players[p_idx]
                 for uid in list(p.attack + p.defense):
@@ -1448,9 +1121,9 @@ class RuntimeEffectsMixin(
                         continue
                     if _norm(inst.definition.card_type) not in {"santo", "token"}:
                         continue
-                    tornado_to_destroy.append((inst.owner, uid))
+                    cards_to_destroy.append((inst.owner, uid))
 
-            for real_owner, uid in tornado_to_destroy:
+            for real_owner, uid in cards_to_destroy:
                 if uid not in engine.state.instances:
                     continue
                 engine.destroy_saint_by_uid(real_owner, uid, cause="effect")
@@ -1477,14 +1150,13 @@ class RuntimeEffectsMixin(
             target = self._resolve_player_scope(owner_idx, effect.target_player or "me")
             count = max(1, int(effect.amount or 1))
             promise_state = dict(
-                engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False})
+                engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False})
                 or {"0": False, "1": False}
             )
             merged = bool(promise_state.get(str(target), False))
             for _ in range(count):
                 player = engine.state.players[target]
                 if merged:
-                    # With Promessa dell'oltretomba active, deck and graveyard are one logical zone.
                     # Prefer deck top, then graveyard top if deck is empty.
                     if player.deck:
                         top_uid = player.deck[-1]
@@ -1572,60 +1244,6 @@ class RuntimeEffectsMixin(
                 if moved:
                     engine.state.log(f"{inst.definition.name} viene aggiunta alla mano.")
                 break
-            return
-        if action == "choose_artifact_from_relicario_then_shuffle":
-            flags = engine.state.flags
-            target = self._resolve_player_scope(owner_idx, effect.target_player or "me")
-            player = engine.state.players[target]
-
-            choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-            choice_ready = bool(flags.get("_runtime_choice_ready"))
-            expected_choice_source = f"{source_uid}:choose_artifact_from_relicario_then_shuffle:{target}"
-
-            if choice_ready and choice_source == expected_choice_source:
-                selected_uid = str(flags.get("_runtime_choice_selected", "")).strip()
-                candidates_raw = str(flags.get("_runtime_choice_candidates", "")).strip()
-                candidates = [v for v in candidates_raw.split(";;") if v]
-                if selected_uid in candidates and selected_uid in player.deck:
-                    self._move_uid_to_zone(engine, selected_uid, "hand", target)
-                engine.rng.shuffle(player.deck)
-                for key in (
-                    "_runtime_choice_source",
-                    "_runtime_choice_ready",
-                    "_runtime_choice_selected",
-                    "_runtime_choice_candidates",
-                    "_runtime_choice_owner",
-                    "_runtime_choice_title",
-                    "_runtime_choice_prompt",
-                    "_runtime_choice_min_targets",
-                    "_runtime_choice_max_targets",
-                ):
-                    flags.pop(key, None)
-                return
-
-            candidates = [
-                uid for uid in player.deck
-                if uid in engine.state.instances and _norm(engine.state.instances[uid].definition.card_type) == _norm("artefatto")
-            ]
-            if not candidates:
-                engine.rng.shuffle(player.deck)
-                return
-
-            flags["_runtime_choice_source"] = expected_choice_source
-            flags["_runtime_choice_candidates"] = ";;".join(candidates)
-            flags["_runtime_choice_owner"] = str(target)
-            flags["_runtime_choice_title"] = "Pietra Focaia"
-            flags["_runtime_choice_prompt"] = "Scegli un Artefatto dal reliquiario da aggiungere alla mano."
-            flags["_runtime_choice_min_targets"] = "1"
-            flags["_runtime_choice_max_targets"] = "1"
-            flags["_runtime_choice_ready"] = False
-            flags["_runtime_reveal_card"] = source_uid
-            flags["_runtime_waiting_for_reveal"] = True
-            flags["_runtime_resume_source"] = source_uid
-            flags["_runtime_resume_owner"] = str(owner_idx)
-            flags["_runtime_pending_mode"] = "trigger_action"
-            flags["_runtime_trigger_action"] = "choose_artifact_from_relicario_then_shuffle"
-            flags["_runtime_trigger_target_player"] = str(effect.target_player or "me")
             return
         if action in {"optional_recover_all_matching_then_shuffle", "optional_recover_matching_then_shuffle"}:
             flags = engine.state.flags

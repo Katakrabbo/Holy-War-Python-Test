@@ -61,7 +61,7 @@ SUPPORTED_CONDITION_KEYS = {
     "controller_has_card_in_deck_with_name",
     "controller_has_building_with_name",
     "controller_has_building_matching",
-    "controller_altare_sigilli_gte",
+    "controller_counter_gte",
     "controller_drawn_cards_this_turn_gte",
     "controller_has_distinct_saints_gte",
     "controller_has_distinct_cards_gte",
@@ -112,22 +112,14 @@ SUPPORTED_EFFECT_ACTIONS = {
     "increase_source_stats_from_zone_count_div",
     "double_strength",
     "increase_strength_equal_to_target_base_faith",
-    "calice_upkeep",
-    "calice_endturn",
-    "add_seal_counter",
-    "remove_seal_counter",
-    "campana_add_counter",
-    "campana_remove_counter",
-    "campana_spend_counters_grant_faith",
-    "cataclisma_ciclico",
-    "kah_ok_tick",
-    "trombe_del_giudizio_tick",
-    "av_drna_on_opponent_draw",
+    "add_player_counter",
+    "remove_player_counter",
+    "add_source_counter",
+    "remove_source_counter",
     "pay_sin_or_destroy_self",
     "mill_cards",
     "draw_cards",
     "draw_matching_from_top_n",
-    "resolve_monsone_payload",
     "draw_cards_and_set_play_cost_for_drawn_until_turn_end",
     "draw_by_zone_count_comparison",
     "draw_by_excommunicated_count_comparison",
@@ -214,13 +206,9 @@ SUPPORTED_EFFECT_ACTIONS = {
     "excommunicate_card_no_sin",
     "store_target_faith_and_excommunicate_no_sin",
     "move_first_to_hand",
-    "absorb_target_stats_and_link",
-    "destroy_source_if_linked_to_event_card",
     "destroy_source_if_equipped_target_is_event_card",
     "move_source_to_zone_if_equipped_target_is_event_card",
     "inflict_sin_to_event_owner_equal_base_faith_if_equipped_target",
-    "phdrna_activate_destroy_target_then_self",
-    "choose_artifact_from_relicario_then_shuffle",
     "inflict_sin_from_source_paid_inspiration",
     "optional_recover_all_matching_then_shuffle",
     "optional_recover_matching_then_shuffle",
@@ -243,12 +231,9 @@ SUPPORTED_EFFECT_ACTIONS = {
     "equip_card",
     "unequip_card",
     "destroy_equipment",
-    "sacrifice_time_resolution",
     "add_link_tag_to_source_from_selected_target",
     "destroy_linked_targets_from_source_tags",
     "move_all_from_zone_to_zone",
-    "activate_oltretomba_promise",
-    "discard_hand_then_pressure_opponent",
     "choose_draw_amount_with_self_sin_cost",
     "choose_and_activate_effect",
 }
@@ -388,6 +373,11 @@ class ActionSpec:
 @dataclass(slots=True)
 class CardScript:
     name: str
+    action_handlers: dict[str, Callable] = field(default_factory=dict)
+    rule_hooks: dict[str, Callable] = field(default_factory=dict)
+    targeting_handlers: dict[str, Callable] = field(default_factory=dict)
+    target_payload_prefix: str = ""
+    counter_tag: str | None = None
     on_play_mode: str = "auto"
     on_enter_mode: str = "auto"
     on_activate_mode: str = "auto"
@@ -425,8 +415,6 @@ class CardScript:
     auto_play_on_draw: bool = False
     end_turn_on_draw: bool = False
     strength_bonus_rules: list[dict[str, Any]] = field(default_factory=list)
-    sigilli_strength_bonus_threshold: int | None = None
-    sigilli_strength_bonus_amount: int | None = None
     is_pyramid: bool = False
     pyramid_strength_bonus_threshold: int | None = None
     pyramid_strength_bonus_amount: int | None = None
@@ -434,14 +422,10 @@ class CardScript:
     pyramid_summon_extra_base_faith_multiplier: int | None = None
     pyramid_turn_draw_bonus_threshold: int | None = None
     pyramid_turn_draw_bonus_amount: int | None = None
-    is_altare_sigilli: bool = False
-    altare_seal_shield_from_source_crosses: bool = False
+    provides_player_counter: bool = False
     inverts_saint_summon_controller: bool = False
     destroy_requires_building_or_artifacts_and_inspiration: dict[str, Any] = field(default_factory=dict)
     indestructible_except_own_activation: bool = False
-    seals_level_size: int | None = None
-    seals_faith_per_level: int | None = None
-    seals_strength_per_level: int | None = None
     immune_to_actions: list[str] = field(default_factory=list)
     incoming_damage_from_enemy_saints_divisor: int = 1
     strength_gain_on_damage_to_enemy_saint: int = 0

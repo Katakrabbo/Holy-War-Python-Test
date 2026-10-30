@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 CARD_NAME = """Av'drna"""
 
@@ -20,3 +20,16 @@ SCRIPT = {
     "on_play_actions": [],
 }
 
+
+def av_drna_on_opponent_draw(self, engine, owner_idx, source_uid, targets, effect):
+    inst = engine.state.instances[source_uid]
+    inst.current_faith = max(0, (inst.current_faith or 0) - 1)
+    engine.reduce_sin(owner_idx, 2)
+    if (inst.current_faith or 0) <= 0:
+        engine.send_to_graveyard(owner_idx, source_uid)
+    return True
+
+
+ACTION_HANDLERS = {
+    'av_drna_on_opponent_draw': av_drna_on_opponent_draw,
+}

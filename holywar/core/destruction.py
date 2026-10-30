@@ -21,9 +21,7 @@ def _apply_sin_reduction_auras(engine: "GameEngine", receiver_idx: int, amount: 
     out = max(0, int(amount))
     if out <= 0:
         return 0
-    if query_ops.has_artifact(engine, receiver_idx, "Giorno 2: Cielo Terrestre"):
-        out //= 2
-    return out
+    return int(runtime_cards.apply_rule(engine, "combat_sin_gain", out, player_idx=receiver_idx))
 
 
 def _equipped_card_types(engine: "GameEngine", saint_uid: str) -> list[str]:
@@ -72,7 +70,7 @@ def _apply_equipped_destroy_protection(
         equip_inst = engine.state.instances.get(equip_uid)
         if equip_inst is None:
             continue
-        rules = runtime_cards.get_protection_rules(equip_inst.definition.name)
+        rules = runtime_cards.get_protection_rules(equip_inst.effect_name)
         for rule in rules:
             if _norm(str(rule.get("event", ""))) != "destroy_by_effect":
                 continue
@@ -158,9 +156,7 @@ def destroy_saint_by_uid(
     if board_owner_idx is None:
         board_owner_idx = owner_idx
     board_player = engine.state.players[board_owner_idx]
-    if "moribondo_shield" in inst.blessed:
-        inst.blessed.remove("moribondo_shield")
-        engine.state.log(f"Moribondo annulla la distruzione di {inst.definition.name}.")
+    if runtime_cards.apply_rule(engine, "prevent_saint_destruction", False, uid=uid, cause=cause):
         return
     if cause == "effect":
         source_uid = str(engine.state.flags.get("_runtime_effect_source", ""))
@@ -177,7 +173,7 @@ def destroy_saint_by_uid(
                     if def_inst is None:
                         continue
                     if runtime_cards.blocks_interaction(
-                        def_inst.definition.name,
+                        def_inst.effect_name,
                         event="destroy_by_effect",
                         source_owner="enemy",
                         target_owner="friendly",
@@ -189,19 +185,6 @@ def destroy_saint_by_uid(
                             f"{def_inst.definition.name} impedisce a {source.definition.name} di distruggere {inst.definition.name}."
                         )
                         return
-    bende_tags = [tag for tag in list(inst.blessed) if isinstance(tag, str) and tag.startswith("bende_consacrate")]
-    if bende_tags:
-        used_tag = bende_tags[0]
-        inst.blessed = [tag for tag in inst.blessed if tag != used_tag]
-        if ":" in used_tag:
-            source_uid = used_tag.split(":", 1)[1].strip()
-            source_inst = engine.state.instances.get(source_uid)
-            if source_inst is not None:
-                engine.destroy_any_card(source_inst.owner, source_uid)
-        inst.current_faith = 1
-        engine.state.log(f"Bende Consacrate salva {inst.definition.name}: rimane con 1 Fede.")
-        return
-
     # Check if the card is currently in an attack or defense slot and clear that slot, keeping track of which slot it was in for later. If the card is not found in either slot, treat it as being on the field without a specific slot. This allows the destruction process to correctly handle the card's position on the board and apply any relevant effects based on whether it was in attack, defense, or just on the field.
     attack_slot = None
     defense_slot = None
@@ -222,9 +205,9 @@ def destroy_saint_by_uid(
 
     # Handle any battle survival mechanics if the cause of destruction is a battle, which can allow the card to avoid destruction by sacrificing a token from the field or excommunicating a card from the graveyard, depending on the card's definition and the current game state. This includes checking for any battle survival modes defined for the card, and if applicable, performing the necessary actions to prevent destruction while applying any relevant effects such as restoring faith or promoting defense slots.
     if cause == "battle":
-        survival_mode = runtime_cards.get_battle_survival_mode(inst.definition.name)
+        survival_mode = runtime_cards.get_battle_survival_mode(inst.effect_name)
         if survival_mode == "sacrifice_token_from_field":
-            token_name = runtime_cards.get_battle_survival_token_name(inst.definition.name)
+            token_name = runtime_cards.get_battle_survival_token_name(inst.effect_name)
             token_uid = None
             if token_name:
                 for s_uid in board_player.attack + board_player.defense:
@@ -238,7 +221,7 @@ def destroy_saint_by_uid(
                 destroy_saint_by_uid(engine, engine.state.instances[token_uid].owner, token_uid, cause="effect")
                 inst.current_faith = max(
                     0,
-                    runtime_cards.get_battle_survival_restore_faith(inst.definition.name) or (inst.definition.faith or 0),
+                    runtime_cards.get_battle_survival_restore_faith(inst.effect_name) or (inst.definition.faith or 0),
                 )
                 if attack_slot is not None:
                     board_player.attack[attack_slot] = uid
@@ -249,7 +232,7 @@ def destroy_saint_by_uid(
                 return
         # Note: the "excommunicate_card_from_graveyard" mode is intentionally checked after the token sacrifice mode, so that if a card has both modes it will try to sacrifice a token first before excommunicating from the graveyard.
         if survival_mode == "excommunicate_card_from_graveyard":
-            rescue_names = {_norm(name) for name in runtime_cards.get_battle_survival_names(inst.definition.name)}
+            rescue_names = {_norm(name) for name in runtime_cards.get_battle_survival_names(inst.effect_name)}
             rescue_uid = None
             for g_uid in list(board_player.graveyard):
                 g_name = _norm(engine.state.instances[g_uid].definition.name)
@@ -267,7 +250,7 @@ def destroy_saint_by_uid(
                 zone_ops.promote_defense_frontline(engine, board_owner_idx)
                 inst.current_faith = max(
                     0,
-                    runtime_cards.get_battle_survival_restore_faith(inst.definition.name) or (inst.definition.faith or 0),
+                    runtime_cards.get_battle_survival_restore_faith(inst.effect_name) or (inst.definition.faith or 0),
                 )
                 engine.state.log(
                     f"{inst.definition.name} evita la distruzione: scomunica {engine.state.instances[rescue_uid].definition.name} "
@@ -307,7 +290,7 @@ def destroy_saint_by_uid(
                 if def_inst is None:
                     continue
                 if runtime_cards.blocks_interaction(
-                    def_inst.definition.name,
+                    def_inst.effect_name,
                     event="sin_on_death",
                     source_owner="any",
                     target_owner="friendly",
@@ -347,9 +330,9 @@ def destroy_saint_by_uid(
     )
     # Note: the "on_card_destroyed_on_field" event is intentionally emitted for all cards destroyed on the field, including tokens, while the more specific "on_this_card_destroyed" event is emitted for all cards but can be used to filter for specific cards or types in response. This allows for more flexible event handling where effects can respond to any card being destroyed on the field, or specifically to certain cards being destroyed, depending on the needs of the effect.
     if excommunicate:
-        engine.excommunicate_card(owner_idx, uid, from_zone_override=from_zone)
+        zone_ops.excommunicate_card(engine, owner_idx, uid, from_zone_override=from_zone, defer_equipment_cleanup=True)
     else:
-        engine.send_to_graveyard(owner_idx, uid, token_to_white=True, from_zone_override=from_zone)
+        zone_ops.send_to_graveyard(engine, owner_idx, uid, token_to_white=True, from_zone_override=from_zone, defer_equipment_cleanup=True)
     if attack_slot is not None:
         back_uid = board_player.defense[attack_slot]
         if back_uid is not None:
@@ -378,6 +361,7 @@ def destroy_saint_by_uid(
             source=by_whom,
         )
     engine._emit_event("on_saint_defeated_or_destroyed", owner_idx, saint=uid, controller=board_owner_idx, reason=cause)
+    zone_ops.cleanup_equipment_links_on_leave_field(engine, uid)
     field_after_dbg = [
         engine.state.instances[c_uid].definition.name
         for c_uid in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense)
@@ -397,7 +381,7 @@ def destroy_any_card(engine: "GameEngine", owner_idx: int, uid: str) -> None:
     inst = engine.state.instances.get(uid)
     if inst is None:
         return
-    script = runtime_cards.get_script(inst.definition.name)
+    script = runtime_cards.get_script(inst.effect_name)
     if script and bool(script.indestructible_except_own_activation):
         allowed_uid = str(engine.state.flags.get("_allow_indestructible_uid", "")).strip()
         if allowed_uid != uid:
@@ -406,25 +390,8 @@ def destroy_any_card(engine: "GameEngine", owner_idx: int, uid: str) -> None:
     if _apply_equipped_destroy_protection(engine, uid, inst):
         return
 
-    # Optional script-driven shield: spend seal counters equal to source card crosses to negate destruction.
-    if script and script.altare_seal_shield_from_source_crosses:
-        source_uid = str(engine.state.flags.get("_runtime_effect_source", "")).strip()
-        if source_uid and source_uid in engine.state.instances and source_uid != uid:
-            source_inst = engine.state.instances[source_uid]
-            try:
-                source_crosses = int(float(source_inst.definition.crosses or 0))
-            except (TypeError, ValueError):
-                source_crosses = 0
-            if source_crosses > 0:
-                board_owner_idx = engine._find_board_owner_of_uid(uid)
-                shield_owner = int(board_owner_idx) if board_owner_idx in (0, 1) else int(inst.owner)
-                seals = int(engine._get_altare_sigilli(shield_owner))
-                if seals >= source_crosses:
-                    engine._set_altare_sigilli(shield_owner, seals - source_crosses)
-                    engine.state.log(
-                        f"{inst.definition.name} rimuove {source_crosses} Segnalini Sigillo e annulla la distruzione."
-                    )
-                    return
+    if runtime_cards.apply_rule(engine, "prevent_card_destruction", False, uid=uid):
+        return
 
     # Optional script-driven destroy tax: enemy must pay inspiration and sacrifice board cards.
     tax_cfg = dict(script.destroy_requires_building_or_artifacts_and_inspiration or {}) if script else {}

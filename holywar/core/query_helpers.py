@@ -83,74 +83,8 @@ def count_pyramids(engine: "GameEngine", player_idx: int) -> int:
     return sum(
         1
         for uid in engine.state.players[player_idx].artifacts
-        if uid and runtime_cards.get_is_pyramid(engine.state.instances[uid].definition.name)
+        if uid and runtime_cards.get_is_pyramid(engine.state.instances[uid].effect_name)
     )
-
-
-# Reads the current seal counter stored on Altare dei Sette Sigilli.
-def get_altare_sigilli(engine: "GameEngine", player_idx: int) -> int:
-    uid = engine.state.players[player_idx].building
-    if uid is None:
-        return 0
-    inst = engine.state.instances[uid]
-    if not runtime_cards.get_is_altare_sigilli(inst.definition.name):
-        return 0
-    for tag in inst.blessed:
-        if tag.startswith("sigilli:"):
-            try:
-                return int(tag.split(":", 1)[1])
-            except ValueError:
-                return 0
-    return 0
-
-
-# Updates the stored seal counter and refreshes dependent bonuses.
-def set_altare_sigilli(engine: "GameEngine", player_idx: int, value: int) -> None:
-    uid = engine.state.players[player_idx].building
-    if uid is None:
-        return
-    inst = engine.state.instances[uid]
-    if not runtime_cards.get_is_altare_sigilli(inst.definition.name):
-        return
-    inst.blessed = [t for t in inst.blessed if not t.startswith("sigilli:")]
-    inst.blessed.append(f"sigilli:{max(0, value)}")
-    refresh_custode_sigilli_bonus(engine, player_idx)
-
-
-# Recomputes the Custode dei Sigilli bonus based on the current seal count.
-def refresh_custode_sigilli_bonus(engine: "GameEngine", player_idx: int) -> None:
-    seals = get_altare_sigilli(engine, player_idx)
-    for uid in all_saints_on_field(engine, player_idx):
-        inst = engine.state.instances[uid]
-        level_size = runtime_cards.get_seals_level_size(inst.definition.name)
-        faith_per_level = runtime_cards.get_seals_faith_per_level(inst.definition.name)
-        strength_per_level = runtime_cards.get_seals_strength_per_level(inst.definition.name)
-        if level_size is None or level_size <= 0:
-            continue
-        if faith_per_level is None and strength_per_level is None:
-            continue
-        level = seals // int(level_size)
-        current_level = 0
-        keep: list[str] = []
-        for tag in inst.blessed:
-            if tag.startswith("custode_bonus:"):
-                try:
-                    current_level = int(tag.split(":", 1)[1])
-                except ValueError:
-                    current_level = 0
-                continue
-            keep.append(tag)
-        if level > current_level:
-            delta = level - current_level
-            if faith_per_level is not None:
-                inst.current_faith = (inst.current_faith or 0) + delta * int(faith_per_level)
-            if strength_per_level is not None and int(strength_per_level) != 0:
-                keep.extend([f"buff_str:{int(strength_per_level)}"] * delta)
-            keep.append(f"custode_bonus:{level}")
-            inst.blessed = keep
-        else:
-            keep.append(f"custode_bonus:{current_level}")
-            inst.blessed = keep
 
 
 # Converts a compact target like a1 or d2 into a board zone and zero-based slot index.
@@ -200,10 +134,6 @@ def consume_barrier(engine: "GameEngine", defender: CardInstance) -> str | None:
                 if not source_in_grave:
                     engine.send_to_graveyard(source_owner, source_uid)
             return "Barriera"
-    for barrier_name in ("Barriera Magica",):
-        if barrier_name in defender.blessed:
-            defender.blessed.remove(barrier_name)
-            return barrier_name
     return None
 
 
@@ -368,7 +298,7 @@ def get_blocked_artifact_slots_for_player(engine: "GameEngine", player_idx: int)
         inst = engine.state.instances.get(enemy_uid)
         if inst is None:
             continue
-        generic_block_count += int(runtime_cards.get_blocks_enemy_artifact_slots(inst.definition.name))
+        generic_block_count += int(runtime_cards.get_blocks_enemy_artifact_slots(inst.effect_name))
         for tag in list(inst.blessed):
             if not isinstance(tag, str) or not tag.startswith("block_enemy_artifact_slot:"):
                 continue

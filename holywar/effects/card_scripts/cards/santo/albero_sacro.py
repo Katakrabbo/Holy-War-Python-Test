@@ -79,3 +79,30 @@ SCRIPT = {
         },
     ],
 }
+
+
+def choose_auto_play_target(runtime, engine, target, *, player_idx, uid, preparation):
+    if preparation or engine.state.instances[uid].effect_name != CARD_NAME:
+        return target
+    chooser = getattr(engine, "choose_auto_play_slot_from_draw", None)
+    if not callable(chooser):
+        return target
+    player = engine.state.players[player_idx]
+    slots = [f"a{i+1}" for i, card in enumerate(player.attack) if card is None]
+    slots += [f"d{i+1}" for i, card in enumerate(player.defense) if card is None]
+    if not slots:
+        return target
+    chosen = str(chooser(player_idx, uid, slots) or "").strip().lower()
+    return chosen if chosen in slots else target
+
+
+RULE_HOOKS = {"auto_play_target": choose_auto_play_target}
+
+
+def ai_score(runtime, engine, score, *, uid, stage):
+    if engine.state.instances[uid].effect_name != CARD_NAME:
+        return score
+    return score + {"permanent": 25, "building_play": 40, "building_tactical": 35}.get(stage, 0)
+
+
+RULE_HOOKS["ai_score"] = ai_score

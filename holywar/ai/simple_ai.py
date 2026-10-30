@@ -131,8 +131,7 @@ def _permanent_value(engine: GameEngine, uid: str) -> int:
     elif ctype == "innata":
         value += 45
 
-    if "albero sacro" in name:
-        value += 25
+    value = runtime_cards.apply_rule(engine, "ai_score", value, uid=uid, stage="permanent")
 
     return value
 
@@ -358,8 +357,7 @@ def _simulate(engine: GameEngine, player_idx: int, move: Move) -> int | None:
         elif ctype == "edificio":
             score += 50 + faith * 4
 
-            if "albero sacro" in name:
-                score += 40
+            score = runtime_cards.apply_rule(engine, "ai_score", score, uid=card.uid, stage="building_play")
 
             if "token" in text or "evoca" in text:
                 score += 25
@@ -430,8 +428,7 @@ def _tactical_bonus(engine: GameEngine, player_idx: int, move: Move) -> int:
 
         elif ctype == "edificio":
             bonus += 18
-            if "albero sacro" in name:
-                bonus += 35
+            bonus = runtime_cards.apply_rule(engine, "ai_score", bonus, uid=card.uid, stage="building_tactical")
 
         elif ctype == "artefatto":
             bonus += 14

@@ -7,6 +7,7 @@ SEARCH_FILTER = {
 }
 
 SCRIPT = {
+    "counter_tag": "campana_counter",
     "on_play_mode": "scripted",
     "on_enter_mode": "auto",
     "on_activate_mode": "scripted",
@@ -20,7 +21,7 @@ SCRIPT = {
                 "condition": {"event_card_type_in": ["benedizione", "maledizione"]},
             },
             "target": {"type": "source_card"},
-            "effect": {"action": "campana_add_counter"},
+            "effect": {"action": "add_source_counter", "flag": "campana_counter"},
         },
     ],
     "on_play_actions": [
@@ -28,7 +29,7 @@ SCRIPT = {
     ],
     "on_activate_actions": [
         {
-            "condition": {"source_counter_gte": 3},
+            "condition": {"source_counter_gte": {"key": "campana_counter", "amount": 3}},
             "target": {
                 "type": "selected_target",
                 "zone": "deck",
@@ -40,12 +41,12 @@ SCRIPT = {
             "effect": {"action": "move_to_hand"},
         },
         {
-            "condition": {"source_counter_gte": 3},
+            "condition": {"source_counter_gte": {"key": "campana_counter", "amount": 3}},
             "target": {"type": "source_card"},
-            "effect": {"action": "campana_remove_counter", "amount": 3},
+            "effect": {"action": "remove_source_counter", "flag": "campana_counter", "amount": 3},
         },
         {
-            "condition": {"source_counter_gte": 3},
+            "condition": {"source_counter_gte": {"key": "campana_counter", "amount": 3}},
             "target": {"type": "source_card"},
             "effect": {"action": "shuffle_deck", "target_player": "me"},
         },

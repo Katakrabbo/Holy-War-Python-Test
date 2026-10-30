@@ -13,7 +13,7 @@ SCRIPT = {
             "effect": {"action": "set_next_turn_draw_override", "amount": 1, "target_player": "opponent"},
         },
         {
-            "condition": {"controller_altare_sigilli_gte": 4},
+            "condition": {"controller_counter_gte": {"key": "sigilli", "amount": 4}},
             "target": {
                 "type": "all_saints_on_field",
                 "owner": "opponent",

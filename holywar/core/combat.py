@@ -22,9 +22,7 @@ def _apply_sin_reduction_auras(engine: "GameEngine", receiver_idx: int, amount: 
     out = max(0, int(amount))
     if out <= 0:
         return 0
-    if query_ops.has_artifact(engine, receiver_idx, "Giorno 2: Cielo Terrestre"):
-        out //= 2
-    return out
+    return int(runtime_cards.apply_rule(engine, "combat_sin_gain", out, player_idx=receiver_idx))
 
 # Checks if there is an active "no attacks until draw" effect in the current game state, which can block all attacks until a player draws a card. This is used to enforce effects that prevent attacking for a turn or until a specific condition is met, and it cleans up any invalid sources of this effect from the runtime state.
 def _has_active_no_attack_until_draw(engine: "GameEngine") -> bool:
@@ -83,21 +81,21 @@ def validate_attack_preconditions(
             aura_inst = engine.state.instances.get(aura_uid)
             if aura_inst is None:
                 continue
-            threshold = runtime_cards.get_blocks_enemy_attackers_with_crosses_lte(aura_inst.definition.name)
+            threshold = runtime_cards.get_blocks_enemy_attackers_with_crosses_lte(aura_inst.effect_name)
             if threshold is None:
                 continue
             if attacker_crosses <= int(threshold):
                 return ActionResult(False, f"{aura_inst.definition.name} impedisce questo attacco.")
 
     # Check the generic can_attack conditions from the runtime card scripts, which may include various custom rules and restrictions for whether the card can attack in the current context. This allows for a flexible system of attack requirements that can be defined on a per-card basis in the runtime scripts.
-    if not runtime_cards.get_can_attack(attacker.definition.name):
+    if not runtime_cards.get_can_attack(attacker.effect_name):
         return ActionResult(False, f"{attacker.definition.name} non puo attaccare.")
     can_attack_now, blocked_msg = runtime_cards.can_attack_now(engine, player_idx, attacker_uid)
     if not can_attack_now:
         return ActionResult(False, blocked_msg or f"{attacker.definition.name} non puo attaccare.")
     if engine._is_attacker_blocked_this_turn(attacker):
         return ActionResult(False, f"{attacker.definition.name} non puo attaccare in questo turno.")
-    can_multi_targets = runtime_cards.get_can_attack_multiple_targets_in_attack_per_turn(attacker.definition.name)
+    can_multi_targets = runtime_cards.get_can_attack_multiple_targets_in_attack_per_turn(attacker.effect_name)
     has_extra_attack = _has_extra_attack_for_turn(attacker, engine.state.turn_number)
     if attacker.exhausted:
         if not can_multi_targets and not has_extra_attack:
@@ -154,7 +152,7 @@ def apply_fiamma_primordiale_after_attack(
     if not building_uid or building_uid not in engine.state.instances:
         return
     building_inst = engine.state.instances[building_uid]
-    burn = runtime_cards.get_retaliation_damage_to_enemy_attacker(building_inst.definition.name)
+    burn = runtime_cards.get_retaliation_damage_to_enemy_attacker(building_inst.effect_name)
     if burn <= 0:
         return
 
@@ -167,7 +165,7 @@ def apply_fiamma_primordiale_after_attack(
         if a_inst is None:
             continue
         linked_building = runtime_cards.get_retaliation_multiplier_for_friendly_building_name(
-            a_inst.definition.name
+            a_inst.effect_name
         )
         if linked_building and _norm(linked_building) == _norm(building_inst.definition.name):
             multiplier_count += 1
@@ -192,7 +190,7 @@ def apply_fiamma_primordiale_after_attack(
     )
     if (attacker.current_faith or 0) <= 0:
         engine.destroy_saint_by_uid(engine.state.instances[attacker_uid].owner, attacker_uid, cause="effect")
-        remove_sin = runtime_cards.get_retaliation_reduce_sin_on_kill(building_inst.definition.name)
+        remove_sin = runtime_cards.get_retaliation_reduce_sin_on_kill(building_inst.effect_name)
         if remove_sin > 0:
             engine.reduce_sin(defender_idx, int(remove_sin))
 
@@ -252,7 +250,7 @@ def resolve_targeted_attack(
         i
         for i, s_uid in enumerate(defender_player.attack)
         if s_uid
-        and runtime_cards.get_attack_targeting_mode(engine.state.instances[s_uid].definition.name)
+        and runtime_cards.get_attack_targeting_mode(engine.state.instances[s_uid].effect_name)
         == "must_be_attack_target"
     ]
     if forced_slots and target_slot not in forced_slots:
@@ -268,9 +266,9 @@ def resolve_targeted_attack(
     if defender_uid is None:
         return ActionResult(False, "Nessun Santo avversario nel bersaglio scelto.")
     defender_name = engine.state.instances[defender_uid].definition.name
-    if runtime_cards.get_attack_targeting_mode(defender_name) == "untargetable":
+    if runtime_cards.get_attack_targeting_mode(engine.state.instances[defender_uid].effect_name) == "untargetable":
         return ActionResult(False, f"{defender_name} non puo essere bersagliato dagli attacchi.")
-    if runtime_cards.get_attack_targeting_mode(defender_name) == "only_if_no_other_attackers":
+    if runtime_cards.get_attack_targeting_mode(engine.state.instances[defender_uid].effect_name) == "only_if_no_other_attackers":
         others = [u for i, u in enumerate(defender_player.attack) if i != target_slot and u is not None]
         if others:
             return ActionResult(False, f"{defender_name} puo essere bersagliato solo se non ci sono altri santi in attacco.")
@@ -297,7 +295,7 @@ def resolve_targeted_attack(
             if not uid:
                 continue
             aura_divisor = runtime_cards.get_incoming_damage_from_enemy_saints_divisor(
-                engine.state.instances[uid].definition.name
+                engine.state.instances[uid].effect_name
             )
             if aura_divisor > defender_damage_divisor:
                 defender_damage_divisor = aura_divisor
@@ -353,7 +351,7 @@ def resolve_targeted_attack(
     )
     lethal = (defender.current_faith or 0) <= 0
     if lethal:
-        excommunicate = runtime_cards.get_battle_excommunicate_on_lethal(attacker.definition.name)
+        excommunicate = runtime_cards.get_battle_excommunicate_on_lethal(attacker.effect_name)
         engine.destroy_saint_by_uid(
             engine.state.instances[defender_uid].owner,
             defender_uid,
@@ -362,11 +360,11 @@ def resolve_targeted_attack(
             by_whom=attacker_uid,
         )
         engine._emit_event("on_this_card_kills_in_battle", player_idx, card=attacker_uid, victim=defender_uid)
-        gain = runtime_cards.get_strength_gain_on_lethal_to_enemy_saint(attacker.definition.name)
+        gain = runtime_cards.get_strength_gain_on_lethal_to_enemy_saint(attacker.effect_name)
         if gain:
             attacker.definition.strength = (attacker.definition.strength or 0) + int(gain)
     else:
-        gain = runtime_cards.get_strength_gain_on_damage_to_enemy_saint(attacker.definition.name)
+        gain = runtime_cards.get_strength_gain_on_damage_to_enemy_saint(attacker.effect_name)
         if gain:
             attacker.definition.strength = (attacker.definition.strength or 0) + int(gain)
 
@@ -377,9 +375,9 @@ def resolve_targeted_attack(
     forced_destroy: list[tuple[int, str]] = []
     attacker_on_board = attacker_uid in (attacker_player.attack + attacker_player.defense)
     defender_on_board = defender_uid in (defender_player.attack + defender_player.defense)
-    if runtime_cards.get_post_battle_forced_destroy(attacker.definition.name) and defender_on_board:
+    if runtime_cards.get_post_battle_forced_destroy(attacker.effect_name) and defender_on_board:
         forced_destroy.append((defender_idx, defender_uid))
-    if runtime_cards.get_post_battle_forced_destroy(defender.definition.name) and attacker_on_board:
+    if runtime_cards.get_post_battle_forced_destroy(defender.effect_name) and attacker_on_board:
         forced_destroy.append((player_idx, attacker_uid))
     for owner_idx, forced_uid in forced_destroy:
         if forced_uid not in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense):
@@ -421,7 +419,7 @@ def attack(engine: "GameEngine", player_idx: int, from_slot: int, target_slot: i
         if defense_uid is None:
             return ActionResult(False, "Nessun Santo in quello slot.")
         defense_inst = engine.state.instances[defense_uid]
-        if not runtime_cards.get_can_attack_from_defense(defense_inst.definition.name):
+        if not runtime_cards.get_can_attack_from_defense(defense_inst.effect_name):
             return ActionResult(False, "Nessun Santo in quello slot.")
         attacker_uid = defense_uid
     else:
@@ -431,7 +429,7 @@ def attack(engine: "GameEngine", player_idx: int, from_slot: int, target_slot: i
             if defense_uid is None:
                 return ActionResult(False, "Nessun Santo in quello slot.")
             defense_inst = engine.state.instances[defense_uid]
-            if not runtime_cards.get_can_attack_from_defense(defense_inst.definition.name):
+            if not runtime_cards.get_can_attack_from_defense(defense_inst.effect_name):
                 return ActionResult(False, "Nessun Santo in quello slot.")
             attacker_uid = defense_uid
 

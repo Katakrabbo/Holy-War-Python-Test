@@ -220,8 +220,8 @@ class GUIGameFlowMixin:
         for i, uid in enumerate(p.hand):
             inst = self.engine.state.instances[uid]
             ctype = inst.definition.card_type.lower()
-            is_moribondo = inst.definition.name.lower().strip() == "moribondo"
-            if ctype in {"benedizione", "maledizione"} or is_moribondo:
+            allows_quick_play = runtime_cards.allows_quick_play(inst.effect_name, inst.definition.card_type)
+            if ctype in {"benedizione", "maledizione"} or allows_quick_play:
                 out.append(i)
         return out
 
@@ -233,14 +233,7 @@ class GUIGameFlowMixin:
         uid = p.hand[hand_idx]
         inst = self.engine.state.instances[uid]
         ctype = inst.definition.card_type.lower()
-        if inst.definition.name.lower().strip() == "moribondo":
-            for i in range(3):
-                if p.attack[i] is not None:
-                    return f"a{i+1}"
-                if p.defense[i] is not None:
-                    return f"d{i+1}"
-            return None
-        if ctype == "benedizione":
+        if runtime_cards.quick_target_owner(inst.effect_name, inst.definition.card_type) == "me":
             for i in range(3):
                 if p.attack[i] is not None:
                     return f"a{i+1}"

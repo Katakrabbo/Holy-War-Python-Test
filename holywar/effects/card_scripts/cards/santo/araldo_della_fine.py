@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 CARD_NAME = """Araldo della Fine"""
 
@@ -13,9 +13,9 @@ SCRIPT = {
                 "type": "cards_controlled_by_owner",
                 "zone": "field",
                 "owner": "me",
-                "card_filter": {"script_is_altare_sigilli": True},
+                "card_filter": {"script_provides_player_counter": True},
             },
-            "effect": {"action": "add_seal_counter", "amount": 3},
+            "effect": {"action": "add_player_counter", "flag": "sigilli", "amount": 3},
         }
     ],
     "on_play_actions": [],

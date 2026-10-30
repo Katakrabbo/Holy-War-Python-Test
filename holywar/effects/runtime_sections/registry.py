@@ -81,6 +81,32 @@ class RuntimeRegistryMixin:
     def register_script(self, script: CardScript) -> None:
         self._scripts[_norm(script.name)] = script
 
+    def apply_rule(self, engine, rule: str, value=None, **context):
+        """Apply rule extensions defined in card files, in registration order."""
+        for script in tuple(self._scripts.values()):
+            hook = script.rule_hooks.get(rule)
+            if hook is not None:
+                value = hook(self, engine, value, **context)
+        return value
+
+    def get_player_counter(self, engine, player_idx: int, key: str) -> int:
+        return int(self.apply_rule(engine, "player_counter", 0, player_idx=player_idx, key=key, operation="get"))
+
+    def allows_quick_play(self, card_name: str, card_type: str) -> bool:
+        script = self.get_script(card_name)
+        return _norm(card_type) in {"benedizione", "maledizione"} or bool(
+            script and script.play_requirements.get("allow_quick_play_out_of_turn", False)
+        )
+
+    def quick_target_owner(self, card_name: str, card_type: str) -> str:
+        script = self.get_script(card_name)
+        default = "me" if _norm(card_type) == "benedizione" else "opponent"
+        return str(script.play_requirements.get("quick_target_owner", default)) if script else default
+
+    def set_player_counter(self, engine, player_idx: int, key: str, value: int) -> None:
+        self.apply_rule(engine, "player_counter", value, player_idx=player_idx, key=key, operation="set")
+        self.apply_rule(engine, "refresh_continuous_effects", player_idx=player_idx)
+
     # This method checks if a given card name corresponds to a card script that has the "activate_once_per_turn" property set to True. It retrieves the card script from the registry using the normalized card name and returns the value of the "activate_once_per_turn" property. If the card script does not exist in the registry, it returns False by default. This method can be used to determine if a card's activation effect is limited to once per turn, which can affect how players choose to use that card during gameplay.
     def is_activate_once_per_turn(self, card_name: str) -> bool:
         script = self._scripts.get(_norm(card_name))
@@ -256,6 +282,11 @@ class RuntimeRegistryMixin:
         self.register_script(
             CardScript(
                 name=card_name,
+                action_handlers=dict(spec.get("action_handlers", {}) or {}),
+                rule_hooks=dict(spec.get("rule_hooks", {}) or {}),
+                targeting_handlers=dict(spec.get("targeting_handlers", {}) or {}),
+                target_payload_prefix=str(spec.get("target_payload_prefix", "")),
+                counter_tag=spec.get("counter_tag"),
                 on_play_mode=str(spec.get("on_play_mode", "auto")),
                 on_enter_mode=str(spec.get("on_enter_mode", "auto")),
                 on_activate_mode=str(spec.get("on_activate_mode", "auto")),
@@ -308,16 +339,6 @@ class RuntimeRegistryMixin:
                 auto_play_on_draw=bool(spec.get("auto_play_on_draw", False)),
                 end_turn_on_draw=bool(spec.get("end_turn_on_draw", False)),
                 strength_bonus_rules=[dict(rule) for rule in spec.get("strength_bonus_rules", []) if isinstance(rule, dict)],
-                sigilli_strength_bonus_threshold=(
-                    int(spec["sigilli_strength_bonus_threshold"])
-                    if spec.get("sigilli_strength_bonus_threshold") is not None
-                    else None
-                ),
-                sigilli_strength_bonus_amount=(
-                    int(spec["sigilli_strength_bonus_amount"])
-                    if spec.get("sigilli_strength_bonus_amount") is not None
-                    else None
-                ),
                 incoming_damage_from_enemy_saints_divisor=max(
                     1,
                     int(spec.get("incoming_damage_from_enemy_saints_divisor", 1) or 1),
@@ -406,22 +427,12 @@ class RuntimeRegistryMixin:
                     if spec.get("pyramid_turn_draw_bonus_amount") is not None
                     else None
                 ),
-                is_altare_sigilli=bool(spec.get("is_altare_sigilli", False)),
-                altare_seal_shield_from_source_crosses=bool(
-                    spec.get("altare_seal_shield_from_source_crosses", False)
-                ),
+                provides_player_counter=bool(spec.get("provides_player_counter", False)),
                 inverts_saint_summon_controller=bool(spec.get("inverts_saint_summon_controller", False)),
                 destroy_requires_building_or_artifacts_and_inspiration=dict(
                     spec.get("destroy_requires_building_or_artifacts_and_inspiration", {}) or {}
                 ),
                 indestructible_except_own_activation=bool(spec.get("indestructible_except_own_activation", False)),
-                seals_level_size=(int(spec["seals_level_size"]) if spec.get("seals_level_size") is not None else None),
-                seals_faith_per_level=(
-                    int(spec["seals_faith_per_level"]) if spec.get("seals_faith_per_level") is not None else None
-                ),
-                seals_strength_per_level=(
-                    int(spec["seals_strength_per_level"]) if spec.get("seals_strength_per_level") is not None else None
-                ),
                 immune_to_actions=[str(v) for v in list(spec.get("immune_to_actions", []) or []) if str(v).strip()],
                 triggered_effects=trig_specs,
                 on_play_actions=on_play_actions,
@@ -561,7 +572,7 @@ class RuntimeRegistryMixin:
         inst = engine.state.instances.get(uid)
         if inst is None:
             return False, "Carta attaccante non valida."
-        script = self.get_script(inst.definition.name)
+        script = self.get_script(inst.effect_name)
         if script is None or not script.attack_requirements:
             return True, None
         ok = self._eval_condition_node(
@@ -720,7 +731,7 @@ class RuntimeRegistryMixin:
 
             # Recalculate bonuses
             new_bonus = 0
-            for rule in self.get_faith_bonus_rules(inst.definition.name):
+            for rule in self.get_faith_bonus_rules(inst.effect_name):
                 amount_mode_key = _norm(str(rule.get("amount_mode", "flat")))
                 if amount_mode_key == "per_count_div_floor":
                     req = dict(rule.get("requirement", {}) or {})
@@ -799,20 +810,6 @@ class RuntimeRegistryMixin:
             if new_bonus:
                 inst.blessed.append(f"conditional_faith_bonus:{new_bonus}")
 
-    # This method checks if a given card is considered a sigilli based on its card script. It looks up the `CardScript` for the specified card name and returns the value of the `is_sigilli` property as a boolean. If the script is not found, it defaults to False. This information can be used to determine if a card has special interactions or properties associated with being a sigilli, which can influence strategic decisions during gameplay.
-    def get_sigilli_strength_bonus_threshold(self, card_name: str) -> int | None:
-        script = self.get_script(card_name)
-        if script is None:
-            return None
-        return script.sigilli_strength_bonus_threshold
-
-    # This method retrieves the amount of strength bonus that a sigilli card should receive based on its card script. It looks up the `CardScript` for the specified card name and returns the value of the `sigilli_strength_bonus_amount` property. If the script is not found or if the property is not set, it returns None. This information can be used to determine if a sigilli card has a specific strength bonus that it gains under certain conditions during gameplay, which can influence how players strategize around that card.
-    def get_sigilli_strength_bonus_amount(self, card_name: str) -> int | None:
-        script = self.get_script(card_name)
-        if script is None:
-            return None
-        return script.sigilli_strength_bonus_amount
-
     # This method checks if a given card is considered a pyramid based on its card script. It looks up the `CardScript` for the specified card name and returns the value of the `is_pyramid` property as a boolean. If the script is not found, it defaults to False. This information can be used to determine if a card has special interactions or properties associated with being a pyramid, which can influence strategic decisions during gameplay.
     def get_is_pyramid(self, card_name: str) -> bool:
         script = self.get_script(card_name)
@@ -862,33 +859,11 @@ class RuntimeRegistryMixin:
             return None
         return script.pyramid_turn_draw_bonus_amount
 
-    # This method checks if a given card is considered an Altare Sigilli based on its card script. It looks up the `CardScript` for the specified card name and returns the value of the `is_altare_sigilli` property as a boolean. If the script is not found, it defaults to False. This information can be used to determine if a card has special interactions or properties associated with being an Altare Sigilli, which can influence strategic decisions during gameplay.
-    def get_is_altare_sigilli(self, card_name: str) -> bool:
+    def get_provides_player_counter(self, card_name: str) -> bool:
         script = self.get_script(card_name)
         if script is None:
             return False
-        return bool(script.is_altare_sigilli)
-
-    # This method retrieves the level size for seals associated with a given card name from the card script. It looks up the `CardScript` for the specified card name and returns the value of the `seals_level_size` property. If the script is not found or if the property is not set, it returns None. This information can be used to determine if a card has specific mechanics related to seals that depend on levels during gameplay, which can influence how players strategize around that card.
-    def get_seals_level_size(self, card_name: str) -> int | None:
-        script = self.get_script(card_name)
-        if script is None:
-            return None
-        return script.seals_level_size
-
-    # This method retrieves the amount of faith that should be gained per level of seals for a given card name from the card script. It looks up the `CardScript` for the specified card name and returns the value of the `seals_faith_per_level` property. If the script is not found or if the property is not set, it returns None. This information can be used to determine if a card has specific mechanics related to gaining faith based on the levels of seals during gameplay, which can influence how players strategize around that card.
-    def get_seals_faith_per_level(self, card_name: str) -> int | None:
-        script = self.get_script(card_name)
-        if script is None:
-            return None
-        return script.seals_faith_per_level
-
-    # This method retrieves the amount of strength that should be gained per level of seals for a given card name from the card script. It looks up the `CardScript` for the specified card name and returns the value of the `seals_strength_per_level` property. If the script is not found or if the property is not set, it returns None. This information can be used to determine if a card has specific mechanics related to gaining strength based on the levels of seals during gameplay, which can influence how players strategize around that card.
-    def get_seals_strength_per_level(self, card_name: str) -> int | None:
-        script = self.get_script(card_name)
-        if script is None:
-            return None
-        return script.seals_strength_per_level
+        return bool(script.provides_player_counter)
 
     # This method checks if a given card is immune to a specific action based on its card script. It looks up the `CardScript` for the specified card name and checks if the normalized action name is present in the list of immune actions defined in the script. If the script is not found, it defaults to False, meaning that if there is no specific script for the card, it is assumed that the card is not immune to any actions. This information can be used to determine if a card has specific immunities to certain actions during gameplay, which can influence strategic decisions around that card.
     def is_immune_to_action(self, card_name: str, action_name: str) -> bool:
@@ -929,7 +904,7 @@ class RuntimeRegistryMixin:
             source_inst = engine.state.instances.get(source_uid)
             if source_inst is None:
                 continue
-            rules = self.get_counted_bonuses(source_inst.definition.name, context=context)
+            rules = self.get_counted_bonuses(source_inst.effect_name, context=context)
             for idx, rule in enumerate(rules):
                 if _norm(str(rule.get("amount_mode", "flat"))) != _norm(amount_mode):
                     continue

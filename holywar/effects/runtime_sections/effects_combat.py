@@ -40,7 +40,7 @@ class RuntimeEffectsCombatMixin:
         def _move_uid_to_zone(self, engine: GameEngine, uid: str, to_zone: str, owner_idx: int) -> bool: ...
         def _selected_target_raw_for_current_action(self, engine: GameEngine) -> str: ...
         def _selected_target_uid_for_current_action(self, engine: GameEngine, owner_idx: int) -> str | None: ...
-        def _shuffle_graveyard_if_oltretomba_active(self, engine: GameEngine, player_idx: int) -> None: ...
+        def _shuffle_merged_zone_if_active(self, engine: GameEngine, player_idx: int) -> None: ...
         def _maybe_auto_activate_discarded_from_hand_by_effect(self, engine: GameEngine, discarded_owner_idx: int, discarded_uid: str, source_uid: str) -> None: ...
         def _resolve_targets(self, engine: GameEngine, owner_idx: int, target: TargetSpec) -> list[str]: ...
         def _summon_generated_token(self, engine: GameEngine, owner_idx: int, token_name: str, preferred_zone: str | None = None, preferred_slot_token: str | None = None) -> str | None: ...
@@ -55,7 +55,7 @@ class RuntimeEffectsCombatMixin:
         ) -> None: ...
         def resolve_enter(self, engine: GameEngine, player_idx: int, uid: str) -> object: ...
         def is_immune_to_action(self, card_name: str, action_name: str) -> bool: ...
-        def get_is_altare_sigilli(self, card_name: str) -> bool: ...
+        def get_provides_player_counter(self, card_name: str) -> bool: ...
         def _count_named_cards_on_field(self, engine: GameEngine, card_name: str) -> int: ...
         def _effect_usage_consume(self, engine: GameEngine, owner_idx: int, source_uid: str, effect: EffectSpec) -> None: ...
         def get_context_bonus_amount(
@@ -206,6 +206,7 @@ class RuntimeEffectsCombatMixin:
                     equip_tag = f"equipped_by:{source_uid}"
                     if equip_tag not in target_inst.blessed:
                         target_inst.blessed.append(equip_tag)
+                    self.on_enter_bind_triggers(engine, source_inst.owner, source_uid)
                     engine._emit_event(
                         "on_player_equips_card",
                         owner_idx,
@@ -267,24 +268,6 @@ class RuntimeEffectsCombatMixin:
                         from_zone="equipped",
                         owner=source_inst.owner,
                     )
-                return True
-            if action == "absorb_target_stats_and_link":
-                source_inst = engine.state.instances.get(source_uid)
-                if source_inst is None:
-                    return True
-                for t_uid in targets:
-                    target_inst = engine.state.instances.get(t_uid)
-                    if target_inst is None:
-                        continue
-                    gain_faith = max(0, int(target_inst.current_faith or 0))
-                    gain_strength = max(0, int(engine.get_effective_strength(t_uid)))
-                    source_inst.current_faith = max(0, int(source_inst.current_faith or 0) + gain_faith)
-                    if gain_strength > 0:
-                        source_inst.blessed.append(f"buff_str:{gain_strength}")
-                    link_tag = f"levigata_link:{t_uid}"
-                    if link_tag not in source_inst.blessed:
-                        source_inst.blessed.append(link_tag)
-                    break
                 return True
             if action == "decrease_strength":
                 amount = max(0, int(effect.amount))
@@ -410,18 +393,6 @@ class RuntimeEffectsCombatMixin:
                 if (attacker_inst.current_faith or 0) <= 0:
                     engine.destroy_saint_by_uid(attacker_inst.owner, attacker_uid, cause="effect")
                 return True
-            if action == "destroy_source_if_linked_to_event_card":
-                source_inst = engine.state.instances.get(source_uid)
-                if source_inst is None:
-                    return True
-                event_uid = str(engine.state.flags.get("_runtime_event_card", "")).strip()
-                if not event_uid:
-                    return True
-                link_tag = f"levigata_link:{event_uid}"
-                if link_tag not in source_inst.blessed:
-                    return True
-                engine.destroy_saint_by_uid(source_inst.owner, source_uid, cause="effect")
-                return True
             if action == "destroy_source_if_equipped_target_is_event_card":
                 source_inst = engine.state.instances.get(source_uid)
                 if source_inst is None:
@@ -516,6 +487,7 @@ class RuntimeEffectsCombatMixin:
                 engine.state.flags[flag_name] = value
                 return True
 
+
             if action == "store_target_faith":
                 flag_name = str(effect.flag or "").strip()
                 if not flag_name:
@@ -593,41 +565,14 @@ class RuntimeEffectsCombatMixin:
                 if not stored_uid or stored_uid not in engine.state.instances:
                     return True
 
-                source_name = ""
-                if source_uid and source_uid in engine.state.instances:
-                    source_name = str(engine.state.instances[source_uid].definition.name or "").strip()
-                inst = engine.state.instances.get(stored_uid)
-                if inst is None:
-                    return True
-                if _norm(source_name) == _norm("Ponte tra Cielo e Polvere"):
-                    me_field_before = [
-                        engine.state.instances[uid].definition.name
-                        for uid in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense)
-                        if uid and uid in engine.state.instances
-                    ]
-                    engine.state.log(
-                        "[PONTE][DESTROY_STORED][BEFORE] "
-                        f"source_uid={source_uid} stored_uid={stored_uid} stored_name={inst.definition.name} "
-                        f"owner={inst.owner} my_field={me_field_before}"
-                    )
-                    ctype = _norm(inst.definition.card_type)
-                    if ctype in {"santo", "token"}:
-                        engine.destroy_saint_by_uid(inst.owner, stored_uid, cause="effect", by_whom=str(source_uid or ""))
-                    else:
-                        engine.destroy_any_card(inst.owner, stored_uid)
-                    me_field_after = [
-                        engine.state.instances[uid].definition.name
-                        for uid in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense)
-                        if uid and uid in engine.state.instances
-                    ]
-                    engine.state.log(
-                        "[PONTE][DESTROY_STORED][AFTER] "
-                        f"source_uid={source_uid} stored_uid={stored_uid} my_field={me_field_after}"
-                    )
+                inst = engine.state.instances[stored_uid]
+                if _norm(inst.definition.card_type) in {"santo", "token"}:
+                    engine.destroy_saint_by_uid(inst.owner, stored_uid, cause="effect", by_whom=source_uid)
                 else:
                     engine.destroy_any_card(inst.owner, stored_uid)
                 return True
-        
+
+
             if action == "summon_stored_card_to_field":
                 store_name = str(effect.stored or "").strip()
                 if not store_name:
@@ -797,25 +742,6 @@ class RuntimeEffectsCombatMixin:
                 return True
         
             if action == "summon_target_to_field":
-                source_name_dbg = ""
-                if source_uid and source_uid in engine.state.instances:
-                    source_name_dbg = str(engine.state.instances[source_uid].definition.name or "").strip()
-                is_ponte_flow = _norm(source_name_dbg) == _norm("Ponte tra Cielo e Polvere")
-                if is_ponte_flow:
-                    chosen_names = [
-                        engine.state.instances[t_uid].definition.name
-                        for t_uid in targets
-                        if t_uid in engine.state.instances
-                    ]
-                    my_field_before = [
-                        engine.state.instances[uid].definition.name
-                        for uid in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense)
-                        if uid and uid in engine.state.instances
-                    ]
-                    engine.state.log(
-                        "[PONTE][SUMMON][BEFORE] "
-                        f"source_uid={source_uid} targets={targets} target_names={chosen_names} my_field={my_field_before}"
-                    )
                 for t_uid in targets:
                     inst = engine.state.instances.get(t_uid)
                     if inst is None:
@@ -984,16 +910,6 @@ class RuntimeEffectsCombatMixin:
                     enter_msg = self.resolve_enter(engine, owner, t_uid)
                     if enter_msg:
                         engine.state.log(str(enter_msg))
-                if is_ponte_flow:
-                    my_field_after = [
-                        engine.state.instances[uid].definition.name
-                        for uid in (engine.state.players[owner_idx].attack + engine.state.players[owner_idx].defense)
-                        if uid and uid in engine.state.instances
-                    ]
-                    engine.state.log(
-                        "[PONTE][SUMMON][AFTER] "
-                        f"source_uid={source_uid} my_field={my_field_after}"
-                    )
                 return True
 
             if action == "return_to_hand":
@@ -1021,7 +937,7 @@ class RuntimeEffectsCombatMixin:
                         player.hand.remove(t_uid)
                         if t_uid not in player.graveyard:
                             player.graveyard.append(t_uid)
-                            self._shuffle_graveyard_if_oltretomba_active(engine, owner)
+                            self._shuffle_merged_zone_if_active(engine, owner)
 
                         engine._emit_event(
                             "on_card_discarded",
@@ -1045,7 +961,7 @@ class RuntimeEffectsCombatMixin:
                         player.deck.remove(t_uid)
                         if t_uid not in player.graveyard:
                             player.graveyard.append(t_uid)
-                            self._shuffle_graveyard_if_oltretomba_active(engine, owner)
+                            self._shuffle_merged_zone_if_active(engine, owner)
 
                         engine._emit_event(
                             "on_card_sent_to_graveyard",
@@ -1068,33 +984,30 @@ class RuntimeEffectsCombatMixin:
                 for t_uid in targets:
                     inst = engine.state.instances[t_uid]
                     current = engine.get_effective_strength(t_uid)
-                    base = max(0, inst.definition.strength or 0)
-                    bonus = current - base
-                    inst.definition.strength = max(0, base + bonus)
                     inst.blessed.append(f"buff_str:{current}")
                 return True
-            if action == "add_seal_counter":
+            if action == "add_player_counter":
                 amount = max(0, int(effect.amount))
                 if amount <= 0:
                     return True
-                before = engine._get_altare_sigilli(owner_idx)
+                before = self.get_player_counter(engine, owner_idx, str(effect.flag or ""))
                 after = before + amount
-                engine._set_altare_sigilli(owner_idx, after)
+                self.set_player_counter(engine, owner_idx, str(effect.flag or ""), after)
                 owner_name = engine.state.players[owner_idx].name
                 engine.state.log(
-                    f"Altare dei Sette Sigilli: {owner_name} aggiunge {amount} Segnalini Sigillo ({before}->{after})."
+                    f"{owner_name}: +{amount} segnalini {effect.flag} ({before}->{after})."
                 )
                 return True
-            if action == "remove_seal_counter":
+            if action == "remove_player_counter":
                 amount = max(0, int(effect.amount))
                 if amount <= 0:
                     return True
-                before = engine._get_altare_sigilli(owner_idx)
+                before = self.get_player_counter(engine, owner_idx, str(effect.flag or ""))
                 after = max(0, before - amount)
-                engine._set_altare_sigilli(owner_idx, after)
+                self.set_player_counter(engine, owner_idx, str(effect.flag or ""), after)
                 owner_name = engine.state.players[owner_idx].name
                 engine.state.log(
-                    f"Altare dei Sette Sigilli: {owner_name} rimuove {amount} Segnalini Sigillo ({before}->{after})."
+                    f"{owner_name}: -{amount} segnalini {effect.flag} ({before}->{after})."
                 )
                 return True
             if action == "decrease_faith":
@@ -1114,44 +1027,20 @@ class RuntimeEffectsCombatMixin:
                     if (inst.current_faith or 0) <= 0 and _norm(inst.definition.card_type) in {"santo", "token"}:
                         engine.destroy_saint_by_uid(inst.owner, t_uid, cause="effect")
                 return True
-            if action == "calice_upkeep":
-                player = engine.state.players[owner_idx]
-                if player.sin >= 5:
-                    player.sin -= 5
-                    engine.state.log(f"{player.name} paga 5 Peccato per mantenere Calice Insanguinato.")
-                else:
-                    engine.send_to_graveyard(owner_idx, source_uid)
-                    engine.state.log(f"{player.name} non puo pagare Calice Insanguinato: la carta viene distrutta.")
-                return True
-            if action == "calice_endturn":
-                destroyed = 0
-                for s_uid in list(targets):
-                    if s_uid not in engine.state.instances:
-                        continue
-                    if self.is_immune_to_action(
-                        engine.state.instances[s_uid].definition.name,
-                        "calice_endturn_destroy",
-                    ):
-                        continue
-                    engine.destroy_saint_by_uid(owner_idx, s_uid, cause="effect")
-                    destroyed += 1
-                if destroyed > 0:
-                    engine.gain_sin(1 - owner_idx, destroyed * 5)
-                return True
-            if action == "campana_add_counter":
+            if action == "add_source_counter":
                 inst = engine.state.instances[source_uid]
                 counter = 0
                 for tag in list(inst.blessed):
-                    if tag.startswith("campana_counter:"):
+                    if tag.startswith(f"{effect.flag}:"):
                         try:
                             counter = int(tag.split(":", 1)[1])
                         except ValueError:
                             counter = 0
                         inst.blessed.remove(tag)
                 counter += 1
-                inst.blessed.append(f"campana_counter:{counter}")
+                inst.blessed.append(f"{effect.flag}:{counter}")
                 return True
-            if action == "campana_remove_counter":
+            if action == "remove_source_counter":
                 inst = engine.state.instances.get(source_uid)
                 if inst is None:
                     return True
@@ -1160,7 +1049,7 @@ class RuntimeEffectsCombatMixin:
                     return True
                 counter = 0
                 for tag in list(inst.blessed):
-                    if not isinstance(tag, str) or not tag.startswith("campana_counter:"):
+                    if not isinstance(tag, str) or not tag.startswith(f"{effect.flag}:"):
                         continue
                     try:
                         counter = int(tag.split(":", 1)[1])
@@ -1169,219 +1058,7 @@ class RuntimeEffectsCombatMixin:
                     inst.blessed.remove(tag)
                     break
                 counter = max(0, counter - amount)
-                inst.blessed.append(f"campana_counter:{counter}")
-                return True
-            if action == "campana_spend_counters_grant_faith":
-                inst = engine.state.instances.get(source_uid)
-                if inst is None:
-                    return True
-                counter = 0
-                counter_tag = ""
-                for tag in list(inst.blessed):
-                    if not isinstance(tag, str) or not tag.startswith("campana_counter:"):
-                        continue
-                    counter_tag = tag
-                    try:
-                        counter = max(0, int(tag.split(":", 1)[1]))
-                    except ValueError:
-                        counter = 0
-                    break
-                if counter <= 0:
-                    return True
-
-                flags = engine.state.flags
-                expected_choice_source = f"{source_uid}:campana_spend_counters_grant_faith"
-                choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-                choice_ready = bool(flags.get("_runtime_choice_ready"))
-                if choice_ready and choice_source == expected_choice_source:
-                    try:
-                        amount = int(str(flags.get("_runtime_choice_selected", "0")).strip())
-                    except ValueError:
-                        amount = 0
-                    amount = max(1, min(amount, counter))
-                    for key in (
-                        "_runtime_choice_source",
-                        "_runtime_choice_ready",
-                        "_runtime_choice_selected",
-                        "_runtime_choice_values",
-                        "_runtime_choice_labels",
-                        "_runtime_choice_owner",
-                        "_runtime_choice_title",
-                        "_runtime_choice_prompt",
-                        "_runtime_choice_min_targets",
-                        "_runtime_choice_max_targets",
-                    ):
-                        flags.pop(key, None)
-                    if counter_tag:
-                        inst.blessed.remove(counter_tag)
-                    inst.blessed.append(f"campana_counter:{counter - amount}")
-                    for saint_uid in engine.all_saints_on_field(owner_idx):
-                        saint = engine.state.instances.get(saint_uid)
-                        if saint is not None:
-                            saint.current_faith = int(saint.current_faith or 0) + amount
-                    return True
-
-                values = [str(amount) for amount in range(1, counter + 1)]
-                labels = {
-                    value: (f"Rimuovi {value} Segnalino" if value == "1" else f"Rimuovi {value} Segnalini")
-                    for value in values
-                }
-                flags["_runtime_choice_source"] = expected_choice_source
-                flags["_runtime_choice_values"] = ";;".join(values)
-                flags["_runtime_choice_labels"] = json.dumps(labels, ensure_ascii=False)
-                flags["_runtime_choice_owner"] = str(owner_idx)
-                flags["_runtime_choice_title"] = str(effect.choice_title or "Campana")
-                flags["_runtime_choice_prompt"] = str(
-                    effect.choice_prompt or "Quanti Segnalini vuoi rimuovere?"
-                )
-                flags["_runtime_choice_min_targets"] = "1"
-                flags["_runtime_choice_max_targets"] = "1"
-                flags["_runtime_choice_ready"] = False
-                flags["_runtime_resume_same_action"] = True
-                flags["_runtime_reveal_card"] = source_uid
-                flags["_runtime_waiting_for_reveal"] = True
-                return True
-            if action == "cataclisma_ciclico":
-                flags = engine.state.flags
-                expected_choice_source = f"{source_uid}:cataclisma_ciclico"
-                own_saints = engine.all_saints_on_field(owner_idx)
-                opp_idx = 1 - owner_idx
-                opp_saints = engine.all_saints_on_field(opp_idx)
-                candidates = list(dict.fromkeys(own_saints + opp_saints))
-                if not candidates:
-                    # The printed effect destroys Cataclisma itself when there
-                    # are no Saints on the field.
-                    engine.destroy_any_card(owner_idx, source_uid)
-                    return True
-
-                choice_source = str(flags.get("_runtime_choice_source", "")).strip()
-                choice_ready = bool(flags.get("_runtime_choice_ready"))
-                if choice_ready and choice_source == expected_choice_source:
-                    selected_uid = str(flags.get("_runtime_choice_selected", "")).strip().split(",", 1)[0]
-                    target_uid = selected_uid if selected_uid in candidates else ""
-                    for key in (
-                        "_runtime_choice_source",
-                        "_runtime_choice_ready",
-                        "_runtime_choice_selected",
-                        "_runtime_choice_candidates",
-                        "_runtime_choice_owner",
-                        "_runtime_choice_title",
-                        "_runtime_choice_prompt",
-                        "_runtime_choice_min_targets",
-                        "_runtime_choice_max_targets",
-                    ):
-                        flags.pop(key, None)
-                    if not target_uid:
-                        return True
-                else:
-                    flags["_runtime_choice_source"] = expected_choice_source
-                    flags["_runtime_choice_candidates"] = ";;".join(candidates)
-                    flags["_runtime_choice_owner"] = str(owner_idx)
-                    flags["_runtime_choice_title"] = "Cataclisma Ciclico"
-                    flags["_runtime_choice_prompt"] = "Scegli il Santo che Cataclisma Ciclico deve distruggere."
-                    flags["_runtime_choice_min_targets"] = "1"
-                    flags["_runtime_choice_max_targets"] = "1"
-                    flags["_runtime_choice_ready"] = False
-                    flags["_runtime_reveal_card"] = source_uid
-                    flags["_runtime_waiting_for_reveal"] = True
-                    flags["_runtime_resume_source"] = source_uid
-                    flags["_runtime_resume_owner"] = str(owner_idx)
-                    flags["_runtime_pending_mode"] = "trigger_action"
-                    flags["_runtime_trigger_action"] = "cataclisma_ciclico"
-                    flags["_runtime_trigger_event_name"] = str(flags.get("_runtime_event_name", "on_my_turn_start"))
-                    return True
-
-                target_owner = engine.state.instances[target_uid].owner
-                target_name = engine.state.instances[target_uid].definition.name
-                engine.destroy_saint_by_uid(target_owner, target_uid, cause="effect")
-                if target_owner == owner_idx:
-                    engine.gain_sin(opp_idx, 2)
-                    engine.state.log(
-                        f"Cataclisma Ciclico distrugge {target_name}: +2 Peccato a {engine.state.players[opp_idx].name}."
-                    )
-                else:
-                    engine.reduce_sin(owner_idx, 1)
-                    engine.state.log(
-                        f"Cataclisma Ciclico distrugge {target_name}: {engine.state.players[owner_idx].name} perde 1 Peccato."
-                    )
-                return True
-            if action == "kah_ok_tick":
-                inst = engine.state.instances[source_uid]
-                inst.current_faith = (inst.current_faith or 0) + 2
-                if (inst.current_faith or 0) >= 10:
-                    gained = max(0, inst.current_faith or 0)
-                    engine.destroy_saint_by_uid(owner_idx, source_uid, cause="effect")
-                    engine.gain_sin(owner_idx, gained)
-                    engine.state.log(
-                        f"Kah-ok raggiunge 10 Fede e si distrugge: {engine.state.players[owner_idx].name} +{gained} Peccato."
-                    )
-                return True
-            if action == "trombe_del_giudizio_tick":
-                b_uid = engine.state.players[owner_idx].building
-                if b_uid is None:
-                    return True
-                if not self.get_is_altare_sigilli(engine.state.instances[b_uid].definition.name):
-                    return True
-                seals = engine._get_altare_sigilli(owner_idx)
-                if seals >= 7:
-                    amount = 10
-                elif seals >= 5:
-                    amount = 6
-                elif seals >= 3:
-                    amount = 3
-                else:
-                    amount = 0
-                if amount > 0:
-                    engine.gain_sin(1 - owner_idx, amount)
-                return True
-            if action == "av_drna_on_opponent_draw":
-                inst = engine.state.instances[source_uid]
-                inst.current_faith = max(0, (inst.current_faith or 0) - 1)
-                engine.reduce_sin(owner_idx, 2)
-                if (inst.current_faith or 0) <= 0:
-                    engine.send_to_graveyard(owner_idx, source_uid)
-                return True
-            if action == "phdrna_activate_destroy_target_then_self":
-                selected = str(engine.state.flags.get("_runtime_selected_target", "")).strip()
-                target_uid = selected if selected in engine.state.instances else None
-                if not target_uid:
-                    return True
-
-                selected_option = _norm(str(engine.state.flags.get("_runtime_selected_option", "")))
-                player = engine.state.players[owner_idx]
-                cost_inspiration = 10
-
-                if selected_option == "building":
-                    if player.building is None:
-                        return True
-                    engine.send_to_graveyard(owner_idx, player.building)
-                elif selected_option == "artifacts":
-                    artifacts = [uid for uid in player.artifacts if uid]
-                    if len(artifacts) < 4:
-                        return True
-                    for art_uid in artifacts[:4]:
-                        engine.send_to_graveyard(owner_idx, art_uid)
-                else:
-                    return True
-
-                total_inspiration = int(player.inspiration) + int(getattr(player, "temporary_inspiration", 0))
-                if total_inspiration < cost_inspiration:
-                    return True
-
-                temp = max(0, int(getattr(player, "temporary_inspiration", 0)))
-                use_temp = min(temp, cost_inspiration)
-                player.temporary_inspiration = temp - use_temp
-                player.inspiration = max(0, int(player.inspiration) - (cost_inspiration - use_temp))
-
-                target_inst = engine.state.instances.get(target_uid)
-                if target_inst is not None:
-                    engine.destroy_any_card(target_inst.owner, target_uid)
-
-                engine.state.flags["_allow_indestructible_uid"] = source_uid
-                source_inst = engine.state.instances.get(source_uid)
-                if source_inst is not None:
-                    engine.destroy_any_card(source_inst.owner, source_uid)
-                engine.state.flags.pop("_allow_indestructible_uid", None)
+                inst.blessed.append(f"{effect.flag}:{counter}")
                 return True
             if action == "pay_sin_or_destroy_self":
                 cost = max(0, int(effect.amount))
@@ -1408,7 +1085,7 @@ class RuntimeEffectsCombatMixin:
                         break
                     uid = player.deck.pop()
                     player.graveyard.append(uid)
-                    self._shuffle_graveyard_if_oltretomba_active(engine, target)
+                    self._shuffle_merged_zone_if_active(engine, target)
                 return True
             if action == "mill_top_and_store_card_type":
                 target = self._resolve_player_scope(owner_idx, effect.target_player or "opponent")
@@ -1419,7 +1096,7 @@ class RuntimeEffectsCombatMixin:
                     return True
                 uid = player.deck.pop()
                 player.graveyard.append(uid)
-                self._shuffle_graveyard_if_oltretomba_active(engine, target)
+                self._shuffle_merged_zone_if_active(engine, target)
                 inst = engine.state.instances.get(uid)
                 engine.state.flags[f"_runtime_store_{store_name}"] = _norm(inst.definition.card_type) if inst is not None else ""
                 return True

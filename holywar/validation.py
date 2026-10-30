@@ -72,7 +72,7 @@ def _validate_target(raw: Any, location: str, report: ValidationReport) -> None:
         report.errors.append(f"{location}: min_targets ({minimum}) supera max_targets ({maximum}).")
 
 
-def _validate_action(raw: Any, location: str, report: ValidationReport, *, triggered: bool) -> None:
+def _validate_action(raw: Any, location: str, report: ValidationReport, *, triggered: bool, custom_actions: set[str] | None = None) -> None:
     if not isinstance(raw, dict):
         report.errors.append(f"{location}: l'azione deve essere un oggetto.")
         return
@@ -101,7 +101,7 @@ def _validate_action(raw: Any, location: str, report: ValidationReport, *, trigg
         report.errors.append(f"{location}.effect: action mancante.")
         return
     canonical = EFFECT_ACTION_ALIASES.get(action, action)
-    if canonical not in CANONICAL_ACTIONS:
+    if canonical not in CANONICAL_ACTIONS and canonical not in (custom_actions or set()):
         report.errors.append(f"{location}.effect: action sconosciuta '{action}'.")
 
     minimum = effect.get("min_targets")
@@ -173,6 +173,10 @@ def validate_project(cards_path: str | Path) -> ValidationReport:
             report.errors.append(f"Script duplicato per '{name}': {scripts[key]} e {module_info.name}.")
             continue
         scripts[key] = module_info.name
+        for extension in ("ACTION_HANDLERS", "RULE_HOOKS", "TARGETING_HANDLERS"):
+            handlers = getattr(module, extension, {})
+            if not isinstance(handlers, dict) or any(not callable(handler) for handler in handlers.values()):
+                report.errors.append(f"{name}.{extension}: deve essere una mappa di funzioni.")
         if card_names and key not in card_names:
             report.warnings.append(f"{name}: esiste uno script ma non una carta nel JSON.")
 
@@ -187,11 +191,12 @@ def validate_project(cards_path: str | Path) -> ValidationReport:
                     f"{name}.{group}[{index}]",
                     report,
                     triggered=group == "triggered_effects",
+                    custom_actions=set(getattr(module, "ACTION_HANDLERS", {})),
                 )
 
     report.scripts = len(scripts)
     for key in sorted(card_names - set(scripts)):
-        report.warnings.append(f"Carta senza script dedicato: '{key}'.")
+        report.errors.append(f"Carta senza script dedicato: '{key}'.")
     return report
 
 

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 CARD_NAME = 'Primo Sigillo'
 
@@ -10,12 +10,12 @@ SCRIPT = {
     "triggered_effects": [],
     "on_play_actions": [
         {
-            "condition": {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}},
+            "condition": {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}},
             "target": {"type": "source_card"},
-            "effect": {"action": "add_seal_counter", "amount": 2},
+            "effect": {"action": "add_player_counter", "flag": "sigilli", "amount": 2},
         },
         {
-            "condition": {"not": {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}}},
+            "condition": {"not": {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}}},
             "target": {
                 "type": "cards_controlled_by_owner",
                 "zone": "deck",
@@ -29,7 +29,7 @@ SCRIPT = {
             "effect": {"action": "move_to_hand"},
         },
         {
-            "condition": {"not": {"controller_has_building_matching": {"card_filter": {"script_is_altare_sigilli": True}}}},
+            "condition": {"not": {"controller_has_building_matching": {"card_filter": {"script_provides_player_counter": True}}}},
             "target": {"type": "source_card"},
             "effect": {"action": "shuffle_deck", "target_player": "me"},
         },

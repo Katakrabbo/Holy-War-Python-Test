@@ -8,6 +8,7 @@ from pathlib import Path
 from holywar.app_paths import bundled_data_dir
 from holywar.ai.simple_ai import choose_action
 from holywar.core.engine import GameEngine
+from holywar.effects.runtime import runtime_cards
 from holywar.core.state import GameState
 from holywar.data.deck_builder import (
     available_premade_decks,
@@ -126,7 +127,7 @@ def prompt_reaction(engine: GameEngine, defender_idx: int) -> None:
         for i, uid in enumerate(p.hand):
             inst = engine.state.instances[uid].definition
             t = inst.card_type.lower()
-            if t in {"benedizione", "maledizione"} or inst.name.lower().strip() == "moribondo":
+            if runtime_cards.allows_quick_play(inst.name, inst.card_type):
                 quick_indexes.append(i)
         if not quick_indexes:
             return

@@ -48,7 +48,7 @@ class RuntimeEffectsRemovalMixin:
         if action == "excommunicate_top_cards_from_relicario":
             target = self._resolve_player_scope(owner_idx, effect.target_player or "me")
             count = max(1, int(effect.amount or 1))
-            promise_state = dict(engine.state.flags.get("oltretomba_promise_active", {"0": False, "1": False}) or {"0": False, "1": False})
+            promise_state = dict(engine.state.flags.get("deck_graveyard_merge_active", {"0": False, "1": False}) or {"0": False, "1": False})
             merged = bool(promise_state.get(str(target), False))
             for _ in range(count):
                 player = engine.state.players[target]

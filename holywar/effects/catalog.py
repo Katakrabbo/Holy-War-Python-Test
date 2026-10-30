@@ -142,7 +142,8 @@ def _walk_condition_keys(node: Any, out: set[str]) -> None:
     if isinstance(node, dict):
         for k, v in node.items():
             out.add(str(k))
-            _walk_condition_keys(v, out)
+            if k in {"all_of", "any_of", "not"}:
+                _walk_condition_keys(v, out)
     elif isinstance(node, list):
         for it in node:
             _walk_condition_keys(it, out)
@@ -161,7 +162,7 @@ def validate_registered_scripts() -> dict[str, list[str]]:
             action = str(te.effect.action).strip().lower()
             if action:
                 canonical = EFFECT_ACTION_ALIASES.get(action, action)
-                if canonical not in CANONICAL_ACTIONS:
+                if canonical not in CANONICAL_ACTIONS and canonical not in script.action_handlers:
                     unknown_actions.add(action)
             keys: set[str] = set()
             _walk_condition_keys(te.trigger.condition, keys)

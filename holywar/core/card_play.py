@@ -42,19 +42,16 @@ def _name_haystack(inst: "CardInstance") -> str:
     return " ".join(_norm(part) for part in parts if str(part).strip())
 
 
-def _is_piaga_blessing_or_curse(inst: "CardInstance") -> bool:
-    ctype = _norm(inst.definition.card_type)
-    return ctype in QUICK_TYPES and "piaga" in _norm(inst.definition.name)
-
-
-def _consume_piaga_once_per_turn(
+def _consume_named_play_limit(
     engine: "GameEngine",
     player_idx: int,
     inst: "CardInstance",
 ) -> ActionResult | None:
-    if not _is_piaga_blessing_or_curse(inst):
+    script = runtime_cards.get_script(inst.effect_name)
+    if script is None or not script.play_requirements.get("play_once_per_turn_by_name", False):
         return None
-    used = engine.state.flags.setdefault("piaga_effect_used_turn", {})
+    usage_key = str(script.play_requirements.get("play_usage_state_key", "named_effect_used_turn"))
+    used = engine.state.flags.setdefault(usage_key, {})
     key = f"{player_idx}:{_norm(inst.definition.name)}"
     if int(used.get(key, -1)) == int(engine.state.turn_number):
         return ActionResult(False, f"{inst.definition.name}: effetto non puo essere attivato piu di una volta per turno.")
@@ -80,7 +77,7 @@ def _has_invert_saint_summon_aura(engine: "GameEngine") -> bool:
             inst = engine.state.instances.get(uid)
             if inst is None:
                 continue
-            script = runtime_cards.get_script(inst.definition.name)
+            script = runtime_cards.get_script(inst.effect_name)
             if script and bool(script.inverts_saint_summon_controller):
                 return True
     return False
@@ -129,7 +126,7 @@ def validate_play_constraints(
 
     # Validate placement rules based on card type and target directives, ensuring that the card can be played in the intended location and context. This includes checking for valid zones for Saints/Tokens, ensuring that only one Building is present, and handling any specific placement rules for Artifacts.
     if ctype in SAINT_TYPES:
-        if _norm(runtime_cards.get_play_owner(card.definition.name)) in {"opponent", "enemy", "other"}:
+        if _norm(runtime_cards.get_play_owner(card.effect_name)) in {"opponent", "enemy", "other"}:
             place_owner_idx = 1 - player_idx
         if ctype == "santo" and _has_invert_saint_summon_aura(engine):
             place_owner_idx = 1 - place_owner_idx
@@ -275,7 +272,7 @@ def _consume_scripted_play_costs(
     card: "CardInstance",
     play_target: str | None = None,
 ) -> tuple[ActionResult | None, int]:
-    script = runtime_cards.get_script(card.definition.name)
+    script = runtime_cards.get_script(card.effect_name)
     if script is None:
         return None, 0
     sacrificed_total_faith = 0
@@ -352,7 +349,7 @@ def calculate_play_cost(engine: "GameEngine", player_idx: int, hand_index: int, 
     if hand_index >= 0 and hand_index < len(player.hand):
         if player.hand[hand_index] in free_uids:
             return 0
-    script = runtime_cards.get_script(card.definition.name)
+    script = runtime_cards.get_script(card.effect_name)
     if script is not None:
         free_if = script.play_requirements.get("can_play_without_inspiration_cost_if")
         if _free_play_condition_met(engine, player_idx, free_if):
@@ -360,10 +357,10 @@ def calculate_play_cost(engine: "GameEngine", player_idx: int, hand_index: int, 
     cost = card.definition.faith or 0
 
     if ctype in SAINT_TYPES:
-        fixed = runtime_cards.get_play_cost_fixed(card.definition.name)
+        fixed = runtime_cards.get_play_cost_fixed(card.effect_name)
         if fixed is not None:
             cost = max(0, int(fixed))
-        required_saint = runtime_cards.get_play_cost_zero_if_controller_has_saint_with_name(card.definition.name)
+        required_saint = runtime_cards.get_play_cost_zero_if_controller_has_saint_with_name(card.effect_name)
         if required_saint:
             wanted = _norm(required_saint)
             has_required = any(
@@ -372,12 +369,12 @@ def calculate_play_cost(engine: "GameEngine", player_idx: int, hand_index: int, 
             )
             if has_required:
                 cost = 0
-        if runtime_cards.get_play_cost_zero_if_controller_has_no_saints(card.definition.name):
+        if runtime_cards.get_play_cost_zero_if_controller_has_no_saints(card.effect_name):
             if not engine.all_saints_on_field(player_idx):
                 cost = 0
         reduction_types = {
             _norm(v)
-            for v in runtime_cards.get_play_cost_reduction_if_controller_has_card_type_in_hand(card.definition.name)
+            for v in runtime_cards.get_play_cost_reduction_if_controller_has_card_type_in_hand(card.effect_name)
             if str(v).strip()
         }
         if reduction_types:
@@ -495,7 +492,7 @@ def handle_saint_play(
     enter_msg = resolve_enter_effect(engine, player_idx, uid)
     if enter_msg:
         engine.state.log(enter_msg)
-    engine._refresh_custode_sigilli_bonus(player_idx)
+    runtime_cards.apply_rule(engine, "refresh_continuous_effects", player_idx=player_idx)
     return ActionResult(True, "Carta giocata.")
 
 
@@ -552,8 +549,8 @@ def resolve_quick_play_from_hand(engine: "GameEngine", player_idx: int, uid: str
     card = engine.state.instances[uid]
     if engine._consume_counter_spell(player_idx):
         engine.send_to_graveyard(player_idx, uid)
-        engine.state.log(f"{player.name} prova a usare {card.definition.name}, ma viene annullata da Barriera Magica.")
-        return ActionResult(True, "Attivazione annullata da Barriera Magica.")
+        engine.state.log(f"{player.name} prova a usare {card.definition.name}, ma viene annullata da un effetto di protezione.")
+        return ActionResult(True, "Attivazione annullata da un effetto di protezione.")
     resolved = resolve_card_effect(engine, player_idx, uid, target)
     moved_elsewhere = False
     is_equipped_overlay = any(
@@ -594,7 +591,7 @@ def play_card(engine: "GameEngine", player_idx: int, hand_index: int, target: st
     if card is None:
         return ActionResult(False, "Indice mano non valido.")
     selected_uid = player.hand[hand_index]
-    script = runtime_cards.get_script(card.definition.name)
+    script = runtime_cards.get_script(card.effect_name)
 
     # Determine the card type and handle preparation phase restrictions for Innate cards, including the requirement to play or remove unplayed Innate cards before playing other cards during the preparation phase. This ensures that the rules regarding Innate cards are enforced correctly based on the current game phase and the player's hand.
     ctype = _norm(card.definition.card_type)
@@ -610,7 +607,7 @@ def play_card(engine: "GameEngine", player_idx: int, hand_index: int, target: st
         card = engine.card_from_hand(player_idx, hand_index)
         if card is None:
             return ActionResult(False, "Indice mano non valido.")
-        script = runtime_cards.get_script(card.definition.name)
+        script = runtime_cards.get_script(card.effect_name)
         ctype = _norm(card.definition.card_type)
 
     placement_target, _directives = _split_play_target_with_directives(target)
@@ -626,9 +623,9 @@ def play_card(engine: "GameEngine", player_idx: int, hand_index: int, target: st
         return ActionResult(False, reason or "Non puoi giocare questa carta.")
 
     if ctype in QUICK_TYPES:
-        piaga_limit = _consume_piaga_once_per_turn(engine, player_idx, card)
-        if piaga_limit is not None:
-            return piaga_limit
+        play_limit = _consume_named_play_limit(engine, player_idx, card)
+        if play_limit is not None:
+            return play_limit
 
     # Validate placement constraints based on card type and target, ensuring that the card can be played in the intended location and context according to the game rules and any specific requirements for that card type.
     is_valid, error_message, place_owner_idx, zone, slot = validate_play_constraints(engine, player_idx, card, placement_target)
@@ -724,22 +721,21 @@ def play_card(engine: "GameEngine", player_idx: int, hand_index: int, target: st
     return result
 
 
-# Handles out-of-turn quick plays and the Moribondo protection special case.
 def quick_play(engine: "GameEngine", player_idx: int, hand_index: int, target: str | None = None) -> ActionResult:
     player = engine.state.players[player_idx]
     card = engine.card_from_hand(player_idx, hand_index)
     if card is None:
         return ActionResult(False, "Indice mano non valido.")
     ctype = _norm(card.definition.card_type)
-    script = runtime_cards.get_script(card.definition.name)
+    script = runtime_cards.get_script(card.effect_name)
     quick_cfg = dict(script.play_requirements) if script is not None else {}
     is_quick_override = bool(quick_cfg.get("allow_quick_play_out_of_turn", False))
     if ctype not in QUICK_TYPES and not is_quick_override:
         return ActionResult(False, "Solo Benedizione/Maledizione (o carte con Quick Play dedicato) sono giocabili fuori turno.")
     if ctype in QUICK_TYPES:
-        piaga_limit = _consume_piaga_once_per_turn(engine, player_idx, card)
-        if piaga_limit is not None:
-            return piaga_limit
+        play_limit = _consume_named_play_limit(engine, player_idx, card)
+        if play_limit is not None:
+            return play_limit
     uid = player.hand.pop(hand_index)
     emit_play_events(engine, player_idx, uid, ctype, target)
 

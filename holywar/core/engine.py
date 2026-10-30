@@ -47,6 +47,7 @@ class GameEngine:
             Callable[[int, str], bool]
         ] = None
         self._bootstrap_runtime_bindings()
+        runtime_cards.apply_rule(self, "state_loaded")
         ensure_runtime_state(self)
         refresh_player_flags(self)
 
@@ -65,6 +66,9 @@ class GameEngine:
             for uid in list(active_innate.get(str(controller_idx), []) or []):
                 if uid in self.state.instances:
                     runtime_cards.on_enter_bind_triggers(self, controller_idx, uid)
+        for uid, inst in self.state.instances.items():
+            if any(str(tag).startswith("equipped_to:") for tag in inst.blessed):
+                runtime_cards.on_enter_bind_triggers(self, inst.owner, uid)
 
     # Builds the scripting API wrapper for the selected controller.
     def rules_api(self, controller_idx: int) -> RuleAPI:
@@ -328,17 +332,6 @@ class GameEngine:
     def _find_board_owner_of_uid(self, uid: str) -> int | None:
         return zone_ops.find_board_owner_of_uid(self, uid)
 
-    # Reads the seal count currently stored on Altare dei Sette Sigilli.
-    def _get_altare_sigilli(self, player_idx: int) -> int:
-        return query_ops.get_altare_sigilli(self, player_idx)
-
-    # Updates the seal count stored on Altare dei Sette Sigilli.
-    def _set_altare_sigilli(self, player_idx: int, value: int) -> None:
-        query_ops.set_altare_sigilli(self, player_idx, value)
-
-    # Recomputes the Custode dei Sigilli bonus from the current seal count.
-    def _refresh_custode_sigilli_bonus(self, player_idx: int) -> None:
-        query_ops.refresh_custode_sigilli_bonus(self, player_idx)
 
     # Computes the final combat strength of a card after all bonuses and penalties.
     def get_effective_strength(self, uid: str) -> int:
@@ -362,19 +355,19 @@ class GameEngine:
                 if not a_uid:
                     continue
                 aura = runtime_cards.get_grants_strength_to_friendly_saints(
-                    self.state.instances[a_uid].definition.name
+                    self.state.instances[a_uid].effect_name
                 )
                 if aura:
                     excluded = {
                         _norm(name)
                         for name in runtime_cards.get_grants_strength_to_friendly_saints_except_names(
-                            self.state.instances[a_uid].definition.name
+                            self.state.instances[a_uid].effect_name
                         )
                     }
                     if _norm(inst.definition.name) not in excluded:
                         strength += int(aura)
         # Apply any card-specific rules that grant strength bonuses based on the current game state, such as controlling certain artifacts or having specific cards in certain zones, if the card is on the field as a saint or token. This iterates through any defined strength bonus rules for the card and checks the conditions of each rule against the current game state, applying the bonus if the conditions are met. This allows for complex conditional strength bonuses that can depend on various factors in the game state, providing depth and strategic considerations for card interactions.
-        for rule in runtime_cards.get_strength_bonus_rules(inst.definition.name):
+        for rule in runtime_cards.get_strength_bonus_rules(inst.effect_name):
             artifact_name = str(rule.get("artifact_name", "")).strip()
             if not artifact_name or not self._has_artifact(owner, artifact_name):
                 if artifact_name:
@@ -443,16 +436,12 @@ class GameEngine:
                 amount_mode="per_count_div_floor",
                 target_uid=uid,
             )
-        sigilli_threshold = runtime_cards.get_sigilli_strength_bonus_threshold(inst.definition.name)
-        sigilli_amount = runtime_cards.get_sigilli_strength_bonus_amount(inst.definition.name)
-        if sigilli_threshold is not None and sigilli_amount is not None and self._get_altare_sigilli(owner) >= int(sigilli_threshold):
-            strength += int(sigilli_amount)
         if _norm(inst.definition.card_type) in {"santo", "token"} and zone in {"attack", "defense"}:
             for a_uid in self.state.players[opponent].artifacts:
                 if not a_uid:
                     continue
                 enemy_mod = runtime_cards.get_modifies_enemy_saints_strength(
-                    self.state.instances[a_uid].definition.name
+                    self.state.instances[a_uid].effect_name
                 )
                 if enemy_mod:
                     strength += int(enemy_mod)
@@ -596,7 +585,7 @@ class GameEngine:
             other_uid = self.resolve_board_uid(1 - player_idx, source)
             if other_uid is not None:
                 other_inst = self.state.instances[other_uid]
-                other_script = runtime_cards.get_script(other_inst.definition.name)
+                other_script = runtime_cards.get_script(other_inst.effect_name)
                 if other_script and bool(other_script.can_activate_by_any_player):
                     uid = other_uid
         if uid is None:
@@ -627,19 +616,13 @@ class GameEngine:
         inst.cursed = keep_curses
         if activation_negated:
             return ActionResult(True, f"L'attivazione di {inst.definition.name} e stata annullata.")
-        card_type = _norm(inst.definition.card_type)
-        is_piaga_blessing_or_curse = card_type in {"benedizione", "maledizione"} and "piaga" in _norm(inst.definition.name)
-        if is_piaga_blessing_or_curse and not self.can_activate_once_per_turn(uid):
-            return ActionResult(False, f"{inst.definition.name}: effetto non puo essere attivato piu di una volta per turno.")
-        if runtime_cards.is_activate_once_per_turn(inst.definition.name) and not self.can_activate_once_per_turn(uid):
+        if runtime_cards.is_activate_once_per_turn(inst.effect_name) and not self.can_activate_once_per_turn(uid):
             return ActionResult(True, f"{inst.definition.name}: abilita gia usata in questo turno.")
         can_activate, reason = runtime_cards.can_activate(self, player_idx, uid, target=target)
         if not can_activate:
             self.state.log(f"{src_name}: attivazione fallita. {reason or 'Nessun bersaglio valido disponibile per questa abilita.'}")
             return ActionResult(False, reason or "Nessun bersaglio valido disponibile per questa abilita.")
         msg = resolve_activated_effect(self, player_idx, uid, target)
-        if is_piaga_blessing_or_curse:
-            self.mark_activated_this_turn(uid)
         self._cleanup_zero_faith_saints()
         self.check_win_conditions()
         outcome = self._clean_effect_outcome(src_name, str(msg))

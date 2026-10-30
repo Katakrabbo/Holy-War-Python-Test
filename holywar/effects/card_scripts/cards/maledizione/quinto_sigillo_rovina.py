@@ -12,7 +12,7 @@ SCRIPT = {
     "triggered_effects": [],
     "on_play_actions": [
         {
-            "condition": {"controller_altare_sigilli_gte": 6},
+            "condition": {"controller_counter_gte": {"key": "sigilli", "amount": 6}},
             "target": {
                 "type": "selected_targets",
                 "zone": "field",
@@ -24,7 +24,7 @@ SCRIPT = {
             "effect": {"action": "destroy_card"},
         },
         {
-            "condition": {"not": {"controller_altare_sigilli_gte": 6}},
+            "condition": {"not": {"controller_counter_gte": {"key": "sigilli", "amount": 6}}},
             "target": {
                 "type": "selected_target",
                 "zone": "field",
